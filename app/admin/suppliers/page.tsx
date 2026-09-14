@@ -1,39 +1,78 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Truck } from 'lucide-react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { Plus, Truck, Loader2, Pencil, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
+import { useSuppliers, useCreateSupplier, useUpdateSupplier, useDeleteSupplier, type Supplier } from '@/lib/api/suppliers'
+import { createSupplierSchema } from '@/lib/validation/purchase-order.schema'
+import type { z } from 'zod'
 
-const suppliers = [
-  { id: '1', name: 'Fresh Farms',    phone: '0700-000-001', email: 'fresh@farms.com',    isActive: true },
-  { id: '2', name: 'City Meats',     phone: '0700-000-002', email: 'city@meats.com',     isActive: true },
-  { id: '3', name: 'Dairy Direct',   phone: '0700-000-003', email: 'dairy@direct.com',   isActive: false },
-  { id: '4', name: 'Spice Traders',  phone: '0700-000-004', email: 'spice@traders.com',  isActive: true },
-]
+type FormValues = z.infer<typeof createSupplierSchema>
 
 export default function SuppliersPage() {
   const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState<Supplier | null>(null)
+
+  const { data: suppliers = [], isLoading } = useSuppliers()
+  const createMutation = useCreateSupplier()
+  const updateMutation = useUpdateSupplier()
+  const deleteMutation = useDeleteSupplier()
+
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<FormValues>({
+    resolver: zodResolver(createSupplierSchema),
+  })
+
+  function openEdit(s: Supplier) {
+    setEditing(s)
+    reset({ name: s.name, phone: s.phone ?? '', email: s.email ?? '', address: s.address ?? '' })
+    setOpen(true)
+  }
+
+  function openCreate() {
+    setEditing(null)
+    reset({ name: '', phone: '', email: '', address: '' })
+    setOpen(true)
+  }
+
+  async function onSubmit(values: FormValues) {
+    if (editing) {
+      await updateMutation.mutateAsync({ id: editing.id, data: values })
+    } else {
+      await createMutation.mutateAsync(values)
+    }
+    reset()
+    setOpen(false)
+    setEditing(null)
+  }
+
+  const isPending = createMutation.isPending || updateMutation.isPending
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Suppliers"
-        description="Manage your ingredient suppliers"
-        action={<Button onClick={() => setOpen(true)}><Plus className="mr-2 h-4 w-4" />Add supplier</Button>}
+        title="Suppliers" description="Manage your ingredient suppliers"
+        action={<Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" />Add supplier</Button>}
       />
 
       <Card>
         <CardContent className="p-0">
-          {suppliers.length === 0 ? (
-            <EmptyState icon={Truck} message="No suppliers yet. Add your first supplier." action={{ label: 'Add supplier', onClick: () => setOpen(true) }} />
+          {isLoading ? (
+            <div className="flex flex-col gap-2 p-4">
+              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+            </div>
+          ) : suppliers.length === 0 ? (
+            <EmptyState icon={Truck} message="No suppliers yet." action={{ label: 'Add supplier', onClick: openCreate }} />
           ) : (
             <Table>
               <TableHeader>
@@ -42,15 +81,31 @@ export default function SuppliersPage() {
                   <TableHead>Phone</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {suppliers.map((s) => (
                   <TableRow key={s.id} className="hover:bg-accent">
                     <TableCell className="font-medium">{s.name}</TableCell>
-                    <TableCell className="text-muted-foreground">{s.phone}</TableCell>
-                    <TableCell className="text-muted-foreground">{s.email}</TableCell>
-                    <TableCell><StatusBadge status={s.isActive ? 'active' : 'inactive'} /></TableCell>
+                    <TableCell className="text-muted-foreground">{s.phone ?? '—'}</TableCell>
+                    <TableCell className="text-muted-foreground">{s.email ?? '—'}</TableCell>
+                    <TableCell>
+                      <button onClick={() => updateMutation.mutate({ id: s.id, data: { isActive: !s.isActive } })}>
+                        <StatusBadge status={s.isActive ? 'active' : 'inactive'} />
+                      </button>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button size="icon" variant="ghost" onClick={() => openEdit(s)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(s.id)}
+                          disabled={deleteMutation.isPending}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -59,31 +114,36 @@ export default function SuppliersPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setEditing(null); reset() } }}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Add supplier</DialogTitle></DialogHeader>
-          <div className="flex flex-col gap-4 py-2">
+          <DialogHeader><DialogTitle>{editing ? 'Edit supplier' : 'Add supplier'}</DialogTitle></DialogHeader>
+          <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 py-2">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="name">Name</Label>
-              <Input id="name" placeholder="Fresh Farms" />
+              <Label>Name</Label>
+              <Input placeholder="Fresh Farms" {...register('name')} />
+              {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="phone">Phone</Label>
-              <Input id="phone" placeholder="0700-000-000" />
+              <Label>Phone</Label>
+              <Input placeholder="0700-000-000" {...register('phone')} />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="supplier@example.com" />
+              <Label>Email</Label>
+              <Input type="email" placeholder="supplier@example.com" {...register('email')} />
+              {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="address">Address</Label>
-              <Input id="address" placeholder="Kigali, Rwanda" />
+              <Label>Address</Label>
+              <Input placeholder="Kigali, Rwanda" {...register('address')} />
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={() => setOpen(false)}>Save</Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => { setOpen(false); setEditing(null); reset() }}>Cancel</Button>
+              <Button type="submit" disabled={isPending}>
+                {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {editing ? 'Update' : 'Save'}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

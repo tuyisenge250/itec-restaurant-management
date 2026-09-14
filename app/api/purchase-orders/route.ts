@@ -10,7 +10,10 @@ export async function GET() {
     await requireRole('admin')
     const purchaseOrders = await prisma.purchaseOrder.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { supplier: { select: { name: true } }, items: true },
+      include: {
+        supplier: { select: { name: true } },
+        items: { include: { inventoryItem: { select: { name: true, unit: true } } } },
+      },
     })
     return NextResponse.json(purchaseOrders)
   } catch (err) {
