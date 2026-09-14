@@ -1,0 +1,226 @@
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// AUTH & USERS
+// ─────────────────────────────────────────────
+
+enum Role {
+    admin
+    kitchen
+    waiter
+}
+
+model User {
+    id           String   @id @default(cuid())
+    name         String
+    email        String   @unique
+    passwordHash String
+    role         Role
+    isActive     Boolean  @default(true)
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
+
+    purchaseOrders        PurchaseOrder[]        @relation("CreatedByUser")
+    inventoryTransactions InventoryTransaction[] @relation("RecordedByUser")
+    orders                Order[]                @relation("CreatedByWaiter")
+    payments              Payment[]              @relation("RecordedByUser")
+
+    @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// PROCUREMENT
+// ─────────────────────────────────────────────
+
+model Supplier {
+    id        String   @id @default(cuid())
+    name      String
+    phone     String?
+    email     String?
+    address   String?
+    isActive  Boolean  @default(true)
+    createdAt DateTime @default(now())
+
+    purchaseOrders PurchaseOrder[]
+
+    @@map("suppliers")
+}
+
+enum PurchaseOrderStatus {
+    draft
+    ordered
+    partially_received
+    received
+    cancelled
+}
+
+model PurchaseOrder {
+    id          String              @id @default(cuid())
+    supplierId  String
+    supplier    Supplier            @relation(fields: [supplierId], references: [id])
+    status      PurchaseOrderStatus @default(draft)
+    createdById String
+    createdBy   User                @relation("CreatedByUser", fields: [createdById], references: [id])
+    notes       String?
+    createdAt   DateTime            @default(now())
+    updatedAt   DateTime            @updatedAt
+
+    items PurchaseOrderItem[]
+
+    @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+    id               String        @id @default(cuid())
+    purchaseOrderId  String
+    purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+    inventoryItemId  String
+    inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id])
+    quantityOrdered  Float
+    quantityReceived Float         @default(0)
+    unitCost         Float // cost at time of ordering
+
+    @@map("purchase_order_items")
+}
+
+// ─────────────────────────────────────────────
+// INVENTORY (immutable ledger pattern)
+// ─────────────────────────────────────────────
+
+model InventoryItem {
+    id           String   @id @default(cuid())
+    name         String
+    unit         String // "kg", "l", "pcs", etc.
+    currentStock Float    @default(0) // denormalized cache — source of truth is InventoryTransaction
+    avgUnitCost  Float    @default(0) // weighted-average cost, updated on receipt
+    reorderLevel Float    @default(0)
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
+
+    purchaseOrderItems    PurchaseOrderItem[]
+    recipeItems           RecipeItem[]
+    inventoryTransactions InventoryTransaction[]
+
+    @@map("inventory_items")
+}
+
+enum InventoryTransactionType {
+    receipt // from purchase order
+    consumption // deducted on order fulfillment
+    waste // spoilage / manual write-off
+    adjustment // manual correction
+}
+
+model InventoryTransaction {
+    id              String                   @id @default(cuid())
+    inventoryItemId String
+    inventoryItem   InventoryItem            @relation(fields: [inventoryItemId], references: [id])
+    type            InventoryTransactionType
+    quantity        Float // positive for receipt, negative for consumption/waste
+    unitCost        Float? // cost basis at time of transaction (for receipts)
+    referenceId     String? // e.g. orderId or purchaseOrderId, for traceability
+    recordedById    String
+    recordedBy      User                     @relation("RecordedByUser", fields: [recordedById], references: [id])
+    notes           String?
+    createdAt       DateTime                 @default(now())
+
+    @@index([inventoryItemId, createdAt])
+    @@map("inventory_transactions")
+}
+
+// ─────────────────────────────────────────────
+// RECIPES / MENU
+// ─────────────────────────────────────────────
+
+model MenuItem {
+    id          String   @id @default(cuid())
+    name        String
+    category    String?
+    price       Float
+    isAvailable Boolean  @default(true)
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+
+    recipeItems RecipeItem[]
+    orderItems  OrderItem[]
+
+    @@map("menu_items")
+}
+
+model RecipeItem {
+    id              String        @id @default(cuid())
+    menuItemId      String
+    menuItem        MenuItem      @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+    inventoryItemId String
+    inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+    quantity        Float // amount of inventory item used per one menu item unit
+
+    @@unique([menuItemId, inventoryItemId])
+    @@map("recipe_items")
+}
+
+// ─────────────────────────────────────────────
+// ORDERS
+// ─────────────────────────────────────────────
+
+enum OrderStatus {
+    pending
+    preparing
+    ready
+    served
+    paid
+    cancelled
+}
+
+model Order {
+    id          String      @id @default(cuid())
+    tableNumber String?
+    status      OrderStatus @default(pending)
+    createdById String
+    createdBy   User        @relation("CreatedByWaiter", fields: [createdById], references: [id])
+    createdAt   DateTime    @default(now())
+    updatedAt   DateTime    @updatedAt
+
+    items    OrderItem[]
+    payments Payment[]
+
+    @@map("orders")
+}
+
+model OrderItem {
+    id          String   @id @default(cuid())
+    orderId     String
+    order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+    menuItemId  String
+    menuItem    MenuItem @relation(fields: [menuItemId], references: [id])
+    quantity    Int
+    priceAtSale Float // menu price snapshot at time of order
+    costAtSale  Float // recipe cost snapshot at time of order — critical for accurate historical profit
+
+    @@map("order_items")
+}
+
+// ─────────────────────────────────────────────
+// PAYMENTS (manual for demo — gateway-agnostic)
+// ─────────────────────────────────────────────
+
+model Payment {
+    id           String   @id @default(cuid())
+    orderId      String
+    order        Order    @relation(fields: [orderId], references: [id])
+    method       String // "cash" | "card" | "upi" | "other" — plain string, no gateway coupling
+    amount       Float
+    discount     Float    @default(0)
+    notes        String?
+    recordedById String
+    recordedBy   User     @relation("RecordedByUser", fields: [recordedById], references: [id])
+    createdAt    DateTime @default(now())
+
+    @@map("payments")
+}
