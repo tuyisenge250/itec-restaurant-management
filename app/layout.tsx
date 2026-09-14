@@ -9,6 +9,9 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 export const metadata: Metadata = {
   title: 'Restaurant OS',
   description: 'Restaurant management system',
+  icons: {
+    icon: '/itec_restaurant_logo.png',
+  },
 }
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {

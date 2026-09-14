@@ -1,8 +1,9 @@
 import Link from 'next/link'
+import Image from 'next/image'
 import {
-  UtensilsCrossed, ArrowRight, ShoppingCart, FlaskConical,
+  ArrowRight, ShoppingCart, FlaskConical,
   Users, BarChart3, ChefHat, ClipboardList, CreditCard,
-  TrendingUp, Package, Utensils,
+  TrendingUp, Package,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -12,12 +13,15 @@ import { SeeHowButton } from '@/components/see-how-button'
 
 // ── Reusable logo mark ────────────────────────────────────────────────────────
 function LogoMark({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
-  const box = size === 'lg' ? 'h-12 w-12' : size === 'sm' ? 'h-7 w-7' : 'h-9 w-9'
-  const icon = size === 'lg' ? 'h-6 w-6' : size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4'
+  const width = size === 'lg' ? 260 : size === 'sm' ? 150 : 200
   return (
-    <div className={`flex items-center justify-center rounded-lg bg-primary ${box}`}>
-      <UtensilsCrossed className={`${icon} text-primary-foreground`} />
-    </div>
+    <Image
+      src="/itec_restaurant_logo.png"
+      alt="ITEC Restaurant Management System"
+      width={width}
+      height={Math.round(width * 0.355)}
+      className="h-auto w-auto object-contain"
+    />
   )
 }
 
@@ -79,7 +83,6 @@ export default function LandingPage() {
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-2.5">
             <LogoMark size="sm" />
-            <span className="font-semibold text-foreground">Restaurant OS</span>
           </div>
           <Link href="/login">
             <Button variant="outline" size="sm">Log in</Button>
@@ -198,8 +201,13 @@ export default function LandingPage() {
       <footer className="border-t border-border bg-card py-6">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 text-sm text-muted-foreground sm:px-6">
           <div className="flex items-center gap-2">
-            <Utensils className="h-4 w-4" />
-            <span>Restaurant OS</span>
+            <Image
+              src="/itec_restaurant_logo.png"
+              alt="ITEC Restaurant Management System"
+              width={150}
+              height={53}
+              className="h-auto w-28 object-contain"
+            />
           </div>
           <div className="flex gap-4">
             <span className="cursor-default">Privacy</span>

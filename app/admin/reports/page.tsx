@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { DollarSign, TrendingUp, TrendingDown, Percent, Trash2, Loader2 } from 'lucide-react'
+import { Banknote, TrendingUp, TrendingDown, Percent, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatCard } from '@/components/ui/stat-card'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProfitReport } from '@/lib/api/reports'
+import { rwf } from '@/lib/utils/currency'
 
 function toDateInput(d: Date) {
   return d.toISOString().slice(0, 10)
@@ -56,9 +57,9 @@ export default function ReportsPage() {
       ) : !s ? null : (
         <>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <StatCard icon={DollarSign}   label="Revenue" value={`$${s.netRevenue.toFixed(2)}`} />
-            <StatCard icon={TrendingDown} label="COGS"    value={`$${s.cogs.toFixed(2)}`} />
-            <StatCard icon={TrendingUp}   label="Profit"  value={`$${s.profit.toFixed(2)}`} />
+            <StatCard icon={Banknote}     label="Revenue" value={rwf(s.netRevenue)} />
+            <StatCard icon={TrendingDown} label="COGS"    value={rwf(s.cogs)} />
+            <StatCard icon={TrendingUp}   label="Profit"  value={rwf(s.profit)} />
             <StatCard icon={Percent}      label="Margin"  value={`${s.marginPct.toFixed(1)}%`} />
           </div>
 
@@ -81,9 +82,9 @@ export default function ReportsPage() {
                       <TableRow key={row.menuItemId} className="hover:bg-accent">
                         <TableCell className="font-medium">{row.name}</TableCell>
                         <TableCell className="text-right">{row.quantitySold}</TableCell>
-                        <TableCell className="text-right">${row.revenue.toFixed(2)}</TableCell>
-                        <TableCell className="text-right text-muted-foreground">${row.cogs.toFixed(2)}</TableCell>
-                        <TableCell className="text-right text-success">${row.profit.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">{rwf(row.revenue)}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">{rwf(row.cogs)}</TableCell>
+                        <TableCell className="text-right text-success">{rwf(row.profit)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -104,7 +105,7 @@ export default function ReportsPage() {
                 </div>
                 <div className="flex justify-between border-t border-border pt-2 font-medium">
                   <span>Total waste</span>
-                  <span className="text-destructive">${data.waste.totalCost.toFixed(2)}</span>
+                  <span className="text-destructive">{rwf(data.waste.totalCost)}</span>
                 </div>
               </CardContent>
             </Card>

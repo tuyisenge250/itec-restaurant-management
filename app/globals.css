@@ -14,18 +14,18 @@
   --popover-foreground: #1F2937;
 
   /* Brand */
-  --primary: #E31B23;
+  --primary: #871618;
   --primary-foreground: #FFFFFF;
-  --primary-hover: #B5121B;
+  --primary-hover: #6E1214;
 
   --secondary: #FDECEE;
-  --secondary-foreground: #B5121B;
+  --secondary-foreground: #871618;
 
   --muted: #F8F9FA;
   --muted-foreground: #6B7280;
 
   --accent: #FFF5F5;
-  --accent-foreground: #B5121B;
+  --accent-foreground: #871618;
 
   --destructive: #DC2626;
   --destructive-foreground: #FFFFFF;
@@ -37,17 +37,17 @@
 
   --border: #E5E7EB;
   --input: #E5E7EB;
-  --ring: #E31B23;
+  --ring: #871618;
 
   /* Sidebar-specific tokens (used by components/ui/sidebar.tsx) */
   --sidebar: #FFFFFF;
   --sidebar-foreground: #1F2937;
-  --sidebar-primary: #E31B23;
+  --sidebar-primary: #871618;
   --sidebar-primary-foreground: #FFFFFF;
   --sidebar-accent: #FDECEE;
-  --sidebar-accent-foreground: #B5121B;
+  --sidebar-accent-foreground: #871618;
   --sidebar-border: #E5E7EB;
-  --sidebar-ring: #E31B23;
+  --sidebar-ring: #871618;
 }
 
 @theme inline {

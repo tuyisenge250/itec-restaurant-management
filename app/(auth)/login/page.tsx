@@ -2,7 +2,8 @@
 
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { UtensilsCrossed, Eye, EyeOff, Loader2, ShieldCheck, ChefHat, ConciergeBell } from 'lucide-react'
+import Image from 'next/image'
+import { Eye, EyeOff, Loader2, ShieldCheck, ChefHat, ConciergeBell } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -59,10 +60,14 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
       <div className="mb-6 flex flex-col items-center gap-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
-          <UtensilsCrossed className="h-6 w-6 text-primary-foreground" />
-        </div>
-        <span className="text-lg font-semibold text-foreground">Restaurant OS</span>
+        <Image
+          src="/itec_restaurant_logo.png"
+          alt="ITEC Restaurant Management System"
+          width={420}
+          height={149}
+          className="h-auto w-72 object-contain"
+          priority
+        />
       </div>
 
       <div className="w-full max-w-sm rounded-xl border border-border bg-card p-8 shadow-sm">
