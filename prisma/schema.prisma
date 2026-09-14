@@ -81,7 +81,7 @@ model PurchaseOrderItem {
     purchaseOrderId  String
     purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
     inventoryItemId  String
-    inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id])
+    inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
     quantityOrdered  Float
     quantityReceived Float         @default(0)
     unitCost         Float // cost at time of ordering
@@ -120,7 +120,7 @@ enum InventoryTransactionType {
 model InventoryTransaction {
     id              String                   @id @default(cuid())
     inventoryItemId String
-    inventoryItem   InventoryItem            @relation(fields: [inventoryItemId], references: [id])
+    inventoryItem   InventoryItem            @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
     type            InventoryTransactionType
     quantity        Float // positive for receipt, negative for consumption/waste
     unitCost        Float? // cost basis at time of transaction (for receipts)
@@ -158,7 +158,7 @@ model RecipeItem {
     menuItemId      String
     menuItem        MenuItem      @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
     inventoryItemId String
-    inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+    inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
     quantity        Float // amount of inventory item used per one menu item unit
 
     @@unique([menuItemId, inventoryItemId])

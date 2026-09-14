@@ -6,19 +6,19 @@ type Status =
   | 'active' | 'inactive' | 'low_stock'
 
 const config: Record<Status, { label: string; className: string }> = {
-  pending:            { label: 'Pending',            className: 'bg-muted text-muted-foreground' },
-  preparing:          { label: 'Preparing',          className: 'bg-warning text-warning-foreground' },
-  ready:              { label: 'Ready',              className: 'bg-success text-success-foreground' },
-  served:             { label: 'Served',             className: 'bg-secondary text-secondary-foreground' },
-  paid:               { label: 'Paid',               className: 'bg-success text-success-foreground' },
-  cancelled:          { label: 'Cancelled',          className: 'bg-destructive text-destructive-foreground' },
-  draft:              { label: 'Draft',              className: 'bg-muted text-muted-foreground' },
-  ordered:            { label: 'Ordered',            className: 'bg-warning text-warning-foreground' },
-  partially_received: { label: 'Partial',            className: 'bg-secondary text-secondary-foreground' },
-  received:           { label: 'Received',           className: 'bg-success text-success-foreground' },
-  active:             { label: 'Active',             className: 'bg-success text-success-foreground' },
-  inactive:           { label: 'Inactive',           className: 'bg-muted text-muted-foreground' },
-  low_stock:          { label: 'Low Stock',          className: 'bg-warning text-warning-foreground' },
+  pending:            { label: 'Pending',            className: 'border border-border bg-muted text-foreground' },
+  preparing:          { label: 'Preparing',          className: 'border border-warning/30 bg-warning text-warning-foreground' },
+  ready:              { label: 'Ready',              className: 'border border-success/20 bg-success text-success-foreground' },
+  served:             { label: 'Served',             className: 'border border-primary/10 bg-secondary text-secondary-foreground' },
+  paid:               { label: 'Paid',               className: 'border border-success/20 bg-success text-success-foreground' },
+  cancelled:          { label: 'Cancelled',          className: 'border border-destructive/20 bg-destructive/10 text-destructive' },
+  draft:              { label: 'Draft',              className: 'border border-border bg-muted text-foreground' },
+  ordered:            { label: 'Ordered',            className: 'border border-warning/30 bg-warning text-warning-foreground' },
+  partially_received: { label: 'Partial',            className: 'border border-border bg-secondary text-secondary-foreground' },
+  received:           { label: 'Received',           className: 'border border-success/20 bg-success text-success-foreground' },
+  active:             { label: 'Active',             className: 'border border-success/20 bg-success text-success-foreground' },
+  inactive:           { label: 'Inactive',           className: 'border border-border bg-muted text-foreground' },
+  low_stock:          { label: 'Low Stock',          className: 'border border-warning/30 bg-warning text-warning-foreground' },
 }
 
 export function StatusBadge({ status }: { status: string }) {

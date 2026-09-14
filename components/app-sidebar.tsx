@@ -29,13 +29,13 @@ export function AppSidebar({ role, userName }: { role: Role; userName: string })
   return (
     <Sidebar>
       <SidebarHeader className="px-3 py-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+        <div className="flex items-center gap-3 rounded-md border border-border bg-sidebar-accent/60 px-2 py-2.5 shadow-sm">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-sm">
             <UtensilsCrossed className="h-4 w-4" />
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-medium text-foreground">Restaurant OS</span>
-            <span className="text-xs text-muted-foreground capitalize">{role}</span>
+            <span className="text-sm font-semibold text-foreground">Restaurant OS</span>
+            <span className="text-xs font-medium capitalize text-muted-foreground">{role}</span>
           </div>
         </div>
       </SidebarHeader>
@@ -65,11 +65,11 @@ export function AppSidebar({ role, userName }: { role: Role; userName: string })
       </SidebarContent>
 
       <SidebarFooter className="px-3 py-3">
-        <div className="flex items-center justify-between rounded-md border border-border bg-card px-2 py-2">
-          <span className="text-sm text-foreground">{userName}</span>
+        <div className="flex items-center justify-between rounded-md border border-border bg-card px-2.5 py-2 shadow-sm">
+          <span className="text-sm font-medium text-foreground">{userName}</span>
           <button
             onClick={handleLogout}
-            className="text-muted-foreground hover:text-destructive"
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
             aria-label="Log out"
           >
             <LogOut className="h-4 w-4" />

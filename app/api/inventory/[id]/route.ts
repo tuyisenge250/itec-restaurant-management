@@ -46,7 +46,14 @@ export async function DELETE(
   try {
     await requireRole('admin')
     const { id } = await params
-    await prisma.inventoryItem.delete({ where: { id } })
+
+    await prisma.$transaction([
+      prisma.recipeItem.deleteMany({ where: { inventoryItemId: id } }),
+      prisma.purchaseOrderItem.deleteMany({ where: { inventoryItemId: id } }),
+      prisma.inventoryTransaction.deleteMany({ where: { inventoryItemId: id } }),
+      prisma.inventoryItem.delete({ where: { id } }),
+    ])
+
     return new NextResponse(null, { status: 204 })
   } catch (err) {
     return handleApiError(err)
