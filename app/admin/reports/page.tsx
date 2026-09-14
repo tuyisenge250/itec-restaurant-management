@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProfitReport } from '@/lib/api/reports'
-import { rwf } from '@/lib/utils/currency'
+import { rwf } from '@/lib/utils'
 
 function toDateInput(d: Date) {
   return d.toISOString().slice(0, 10)

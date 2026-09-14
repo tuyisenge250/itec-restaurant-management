@@ -79,19 +79,34 @@ export default function LandingPage() {
     <div className="flex min-h-screen flex-col bg-background">
 
       {/* 1. Nav */}
-      <header className="sticky top-0 z-10 border-b border-border bg-card">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-2.5">
+      <header className="sticky top-0 z-10 px-4 pt-3 sm:px-6">
+        <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-4 rounded-full bg-muted px-5 py-2.5 sm:px-7">
+          <Link href="/" aria-label="ITEC Restaurant Management home" className="shrink-0">
             <LogoMark size="sm" />
-          </div>
-          <Link href="/login">
-            <Button variant="outline" size="sm">Log in</Button>
           </Link>
+
+          <nav className="hidden items-center gap-7 text-sm font-medium text-foreground/80 lg:flex" aria-label="Main navigation">
+            <a href="#home" className="transition-colors hover:text-foreground">Home</a>
+            <a href="#how-it-works" className="transition-colors hover:text-foreground">How it works</a>
+            <a href="#features" className="transition-colors hover:text-foreground">Features</a>
+            <a href="#integrations" className="transition-colors hover:text-foreground">Integrations</a>
+          </nav>
+
+          <div className="flex items-center gap-4">
+            <Link href="/login" className="text-sm font-medium text-foreground transition-colors hover:text-primary">
+              Login
+            </Link>
+            <Link href="/login">
+              <Button size="sm" className="rounded-full bg-foreground px-4 text-background hover:bg-foreground/90">
+                Start Free Trial
+              </Button>
+            </Link>
+          </div>
         </div>
       </header>
 
       {/* 2. Hero */}
-      <section className="mx-auto flex w-full max-w-6xl flex-col items-center gap-12 px-4 py-20 sm:px-6 lg:flex-row lg:py-28">
+      <section id="home" className="mx-auto flex w-full max-w-6xl flex-col items-center gap-12 px-4 py-20 sm:px-6 lg:flex-row lg:py-28">
         <div className="flex flex-1 flex-col gap-6 text-center lg:text-left">
           <Badge className="w-fit self-center bg-secondary text-secondary-foreground lg:self-start">
             Built for restaurant operators
@@ -108,9 +123,9 @@ export default function LandingPage() {
                 Get started <ArrowRight className="ml-1.5 h-4 w-4" />
               </Button>
             </Link>
-            <Button variant="outline" size="lg">
-              See how it works
-            </Button>
+            <a href="#how-it-works">
+              <Button variant="outline" size="lg">See how it works</Button>
+            </a>
           </div>
         </div>
         <div className="flex flex-1 justify-center lg:justify-end">
@@ -119,7 +134,7 @@ export default function LandingPage() {
       </section>
 
       {/* 3. Feature grid */}
-      <section className="bg-accent py-16">
+      <section id="features" className="bg-accent py-16">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <h2 className="mb-10 text-center text-2xl font-bold text-foreground">Everything your kitchen needs</h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -139,7 +154,7 @@ export default function LandingPage() {
       </section>
 
       {/* 4. How it works */}
-      <section className="py-16">
+      <section id="how-it-works" className="py-16">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <h2 className="mb-10 text-center text-2xl font-bold text-foreground">How it works</h2>
           <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start sm:justify-center">
@@ -162,7 +177,7 @@ export default function LandingPage() {
       </section>
 
       {/* 5. Role callout */}
-      <section className="bg-accent py-16">
+      <section id="integrations" className="bg-accent py-16">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <h2 className="mb-10 text-center text-2xl font-bold text-foreground">One system, three roles</h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
