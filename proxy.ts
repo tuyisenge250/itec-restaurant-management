@@ -9,7 +9,7 @@ const roleRoutes: Record<string, string> = {
   '/waiter': 'waiter',
 }
 
-export async function proxy(req: NextRequest) {
+export default async function proxy(req: NextRequest) {
   const token = req.cookies.get('token')?.value
 
   if (!token) {
