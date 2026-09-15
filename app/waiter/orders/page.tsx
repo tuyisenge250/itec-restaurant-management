@@ -1,6 +1,8 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { ClipboardList } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
@@ -10,21 +12,37 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useOrders, useUpdateOrderStatus } from '@/lib/api/orders'
+import { useCurrentUser } from '@/lib/api/auth'
+import { rwf } from '@/lib/utils'
 
 function minutesAgo(iso: string) {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
 }
 
 export default function WaiterOrdersPage() {
+  const router = useRouter()
+  const [mineOnly, setMineOnly] = useState(true)
   const { data: orders = [], isLoading } = useOrders()
+  const { data: me } = useCurrentUser()
   const updateStatus = useUpdateOrderStatus()
-  const active = orders.filter((o) => !['paid', 'cancelled'].includes(o.status))
+
+  const active = orders
+    .filter((o) => !['paid', 'cancelled'].includes(o.status))
+    .filter((o) => !mineOnly || !me || o.createdById === me.id)
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="My Orders" description="Active orders for your tables"
-        action={<Link href="/waiter/orders/new"><Button>New order</Button></Link>}
+        title={mineOnly ? 'My Orders' : 'All Orders'}
+        description="Active orders"
+        action={
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setMineOnly((v) => !v)}>
+              {mineOnly ? 'Show all' : 'Show mine'}
+            </Button>
+            <Link href="/waiter/orders/new"><Button>New order</Button></Link>
+          </div>
+        }
       />
       <Card>
         <CardContent className="p-0">
@@ -33,7 +51,7 @@ export default function WaiterOrdersPage() {
               {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
             </div>
           ) : active.length === 0 ? (
-            <EmptyState icon={ClipboardList} message="No active orders." action={{ label: 'New order', onClick: () => {} }} />
+            <EmptyState icon={ClipboardList} message="No active orders." action={{ label: 'New order', onClick: () => router.push('/waiter/orders/new') }} />
           ) : (
             <Table>
               <TableHeader>
@@ -48,12 +66,14 @@ export default function WaiterOrdersPage() {
               </TableHeader>
               <TableBody>
                 {active.map((o) => {
-                  const total = o.items.reduce((s, i) => s + i.priceAtSale * i.quantity, 0)
+                  const total = o.items.filter((i) => !i.isVoided).reduce((s, i) => s + i.priceAtSale * i.quantity, 0)
                   return (
                     <TableRow key={o.id} className="hover:bg-accent">
-                      <TableCell className="font-medium">{o.tableNumber ?? '—'}</TableCell>
+                      <TableCell className="font-medium">
+                        <Link href={`/waiter/orders/${o.id}`} className="hover:underline">{o.table}</Link>
+                      </TableCell>
                       <TableCell>{o.items.length}</TableCell>
-                      <TableCell>${total.toFixed(2)}</TableCell>
+                      <TableCell>{rwf(total)}</TableCell>
                       <TableCell><StatusBadge status={o.status} /></TableCell>
                       <TableCell className="text-muted-foreground">{minutesAgo(o.createdAt)}m ago</TableCell>
                       <TableCell className="text-right">

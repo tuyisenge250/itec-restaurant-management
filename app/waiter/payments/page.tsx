@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { useOrders } from '@/lib/api/orders'
+import { rwf } from '@/lib/utils'
 
 export default function PaymentsIndexPage() {
   const { data: orders = [], isLoading } = useOrders()
@@ -39,12 +40,12 @@ export default function PaymentsIndexPage() {
               </TableHeader>
               <TableBody>
                 {payable.map((o) => {
-                  const total = o.items.reduce((s, i) => s + i.priceAtSale * i.quantity, 0)
+                  const total = o.items.filter((i) => !i.isVoided).reduce((s, i) => s + i.priceAtSale * i.quantity, 0)
                   return (
                     <TableRow key={o.id} className="hover:bg-accent">
-                      <TableCell className="font-medium">{o.tableNumber ?? '—'}</TableCell>
+                      <TableCell className="font-medium">{o.table}</TableCell>
                       <TableCell>{o.items.length}</TableCell>
-                      <TableCell>${total.toFixed(2)}</TableCell>
+                      <TableCell>{rwf(total)}</TableCell>
                       <TableCell><StatusBadge status={o.status} /></TableCell>
                       <TableCell className="text-right">
                         <Link href={`/waiter/payments/${o.id}`}>

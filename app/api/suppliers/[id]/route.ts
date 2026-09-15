@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
 import { requireRole } from '@/lib/auth/session'
+import { updateSupplierSchema } from '@/lib/validation/purchase-order.schema'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
-
-const updateSupplierSchema = z.object({
-  name: z.string().min(1).optional(),
-  phone: z.string().optional(),
-  email: z.string().email().optional(),
-  address: z.string().optional(),
-  isActive: z.boolean().optional(),
-})
 
 export async function GET(
   _req: NextRequest,

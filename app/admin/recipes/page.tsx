@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
 import { useMenu } from '@/lib/api/menu'
 import { useRecipe } from '@/lib/api/recipes'
+import { rwf } from '@/lib/utils'
 
 function RecipeRow({ menuItemId }: { menuItemId: string }) {
   const { data, isLoading } = useRecipe(menuItemId)
@@ -30,11 +31,26 @@ function RecipeRow({ menuItemId }: { menuItemId: string }) {
               <td className="py-2">{ing.name}</td>
               <td className="py-2 text-right">{ing.quantity}</td>
               <td className="py-2 text-right text-muted-foreground">{ing.unit}</td>
-              <td className="py-2 text-right">${ing.lineCost.toFixed(2)}</td>
+              <td className="py-2 text-right">{rwf(ing.lineCost)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      <div className="mt-3 flex flex-col gap-1 border-t border-border pt-3 text-sm">
+        <div className="flex justify-between text-muted-foreground">
+          <span>Preparation cost</span><span>{rwf(data.preparationCost)}</span>
+        </div>
+        <div className="flex justify-between font-medium text-foreground">
+          <span>Total cost</span><span>{rwf(data.cost)}</span>
+        </div>
+        <div className="flex justify-between text-muted-foreground">
+          <span>Sells for</span><span>{rwf(data.price)}</span>
+        </div>
+        <div className="flex justify-between font-medium">
+          <span>Margin</span>
+          <span className={data.margin < 0 ? 'text-destructive' : 'text-success'}>{data.margin.toFixed(1)}%</span>
+        </div>
+      </div>
     </CardContent>
   )
 }
@@ -71,10 +87,10 @@ export default function RecipesPage() {
                   <div className="flex items-center gap-3">
                     {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                     <span className="font-medium text-foreground">{item.name}</span>
-                    {item.category && <span className="text-sm text-muted-foreground">{item.category}</span>}
+                    {item.category && <span className="text-sm text-muted-foreground">{item.category.name}</span>}
                   </div>
                   <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                    ${item.price.toFixed(2)}
+                    {rwf(item.price)}
                   </span>
                 </button>
                 {isOpen && <RecipeRow menuItemId={item.id} />}

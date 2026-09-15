@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 import { requireRole } from '@/lib/auth/session'
+import { writeAuditLog } from '@/lib/audit'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 
@@ -52,9 +53,20 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireRole('admin')
+    const admin = await requireRole('admin')
     const { id } = await params
-    await prisma.user.update({ where: { id }, data: { isActive: false } })
+
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({ where: { id }, data: { isActive: false }, select })
+      await writeAuditLog(tx, {
+        userId: admin.sub,
+        action: 'user.deactivated',
+        entityType: 'User',
+        entityId: id,
+        afterData: updated,
+      })
+    })
+
     return new NextResponse(null, { status: 204 })
   } catch (err) {
     return handleApiError(err)

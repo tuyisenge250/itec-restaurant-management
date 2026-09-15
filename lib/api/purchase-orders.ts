@@ -2,9 +2,19 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
 import { toast } from 'sonner'
 import type { z } from 'zod'
-import { createPurchaseOrderSchema, receivePurchaseOrderSchema } from '@/lib/validation/purchase-order.schema'
+import {
+  createPurchaseOrderSchema,
+  receivePurchaseOrderSchema,
+  updatePurchaseOrderStatusSchema,
+} from '@/lib/validation/purchase-order.schema'
 
-export type PurchaseOrderStatus = 'draft' | 'ordered' | 'partially_received' | 'received' | 'cancelled'
+export type PurchaseOrderStatus =
+  | 'draft'
+  | 'pending_approval'
+  | 'ordered'
+  | 'partially_received'
+  | 'received'
+  | 'cancelled'
 export type PurchaseOrder = {
   id: string; status: PurchaseOrderStatus; createdAt: string
   supplier: { name: string }
@@ -12,13 +22,18 @@ export type PurchaseOrder = {
 }
 export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>
 export type ReceivePurchaseOrderInput = z.infer<typeof receivePurchaseOrderSchema>
+export type UpdatePurchaseOrderStatusInput = z.infer<typeof updatePurchaseOrderStatusSchema>
 
 export const getPurchaseOrders = () => apiFetch<PurchaseOrder[]>('/api/purchase-orders')
 export const getPurchaseOrder = (id: string) => apiFetch<PurchaseOrder>(`/api/purchase-orders/${id}`)
 export const createPurchaseOrder = (data: CreatePurchaseOrderInput) =>
   apiFetch<PurchaseOrder>('/api/purchase-orders', { method: 'POST', body: JSON.stringify(data) })
 export const receivePurchaseOrder = (id: string, data: ReceivePurchaseOrderInput) =>
-  apiFetch<PurchaseOrder>(`/api/purchase-orders/${id}/recieve`, { method: 'POST', body: JSON.stringify(data) })
+  apiFetch<PurchaseOrder>(`/api/purchase-orders/${id}/receive`, { method: 'POST', body: JSON.stringify(data) })
+export const updatePurchaseOrderStatus = (id: string, data: UpdatePurchaseOrderStatusInput) =>
+  apiFetch<PurchaseOrder>(`/api/purchase-orders/${id}/status`, { method: 'PATCH', body: JSON.stringify(data) })
+export const reorderPurchaseOrder = (id: string) =>
+  apiFetch<PurchaseOrder>(`/api/purchase-orders/${id}/reorder`, { method: 'POST' })
 
 export function usePurchaseOrders() {
   return useQuery({ queryKey: ['purchase-orders'], queryFn: getPurchaseOrders })
@@ -40,6 +55,23 @@ export function useReceivePurchaseOrder() {
       qc.invalidateQueries({ queryKey: ['inventory'] })
       toast.success('Goods received')
     },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+export function useUpdatePurchaseOrderStatus() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdatePurchaseOrderStatusInput }) =>
+      updatePurchaseOrderStatus(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase-orders'] }); toast.success('Purchase order updated') },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+export function useReorderPurchaseOrder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: reorderPurchaseOrder,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase-orders'] }); toast.success('Reorder draft created') },
     onError: (e: Error) => toast.error(e.message),
   })
 }

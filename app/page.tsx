@@ -9,11 +9,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { SeeHowButton } from '@/components/see-how-button'
 
 // ── Reusable logo mark ────────────────────────────────────────────────────────
-function LogoMark({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
-  const width = size === 'lg' ? 260 : size === 'sm' ? 150 : 200
+function LogoMark({ size = 'md' }: { size?: 'xs' | 'sm' | 'md' | 'lg' }) {
+  const width = size === 'lg' ? 260 : size === 'sm' ? 150 : size === 'xs' ? 104 : 200
   return (
     <Image
       src="/itec_restaurant_logo.png"
@@ -80,9 +79,9 @@ export default function LandingPage() {
 
       {/* 1. Nav */}
       <header className="sticky top-0 z-10 px-4 pt-3 sm:px-6">
-        <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-4 rounded-full bg-muted px-5 py-2.5 sm:px-7">
+        <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-4 rounded-full border border-border bg-muted px-5 py-2.5 sm:px-7">
           <Link href="/" aria-label="ITEC Restaurant Management home" className="shrink-0">
-            <LogoMark size="sm" />
+            <LogoMark size="xs" />
           </Link>
 
           <nav className="hidden items-center gap-7 text-sm font-medium text-foreground/80 lg:flex" aria-label="Main navigation">
@@ -93,12 +92,9 @@ export default function LandingPage() {
           </nav>
 
           <div className="flex items-center gap-4">
-            <Link href="/login" className="text-sm font-medium text-foreground transition-colors hover:text-primary">
-              Login
-            </Link>
             <Link href="/login">
-              <Button size="sm" className="rounded-full bg-foreground px-4 text-background hover:bg-foreground/90">
-                Start Free Trial
+              <Button size="sm" className="bg-foreground px-4 text-background hover:bg-foreground/90">
+                Login
               </Button>
             </Link>
           </div>

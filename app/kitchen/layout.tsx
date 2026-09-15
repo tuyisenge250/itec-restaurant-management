@@ -5,7 +5,7 @@ import { Separator } from '@/components/ui/separator'
 export default function KitchenLayout({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider>
-      <AppSidebar role="kitchen" userName="Kitchen User" />
+      <AppSidebar role="kitchen" />
       <SidebarInset>
         <header className="flex h-12 items-center gap-2 border-b border-border bg-card px-4">
           <SidebarTrigger className="-ml-1" />

@@ -5,7 +5,7 @@ import { Separator } from '@/components/ui/separator'
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider>
-      <AppSidebar role="admin" userName="Admin User" />
+      <AppSidebar role="admin" />
       <SidebarInset>
         <header className="flex h-12 items-center gap-2 border-b border-border bg-card/90 px-4 shadow-sm">
           <SidebarTrigger className="-ml-1" />

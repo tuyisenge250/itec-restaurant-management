@@ -1,23 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth/session'
 import { getProfitByMenuItem, getWasteCost } from '@/lib/services/profit.service'
+import { parseReportDateRange } from '@/lib/validation/report.schema'
 import { handleApiError } from '@/lib/api-error'
-
-function parseDateRange(req: NextRequest) {
-  const { searchParams } = new URL(req.url)
-  const from = searchParams.get('from')
-  const to = searchParams.get('to')
-
-  return {
-    from: from ? new Date(from) : new Date(new Date().setHours(0, 0, 0, 0)),
-    to: to ? new Date(to) : new Date(),
-  }
-}
 
 export async function GET(req: NextRequest) {
   try {
     await requireRole('admin')
-    const { from, to } = parseDateRange(req)
+    const { from, to } = parseReportDateRange(req.nextUrl.searchParams)
 
     const [byItem, waste] = await Promise.all([
       getProfitByMenuItem({ from, to }),

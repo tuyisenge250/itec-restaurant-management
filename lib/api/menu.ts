@@ -1,20 +1,22 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
 import { toast } from 'sonner'
+import type { z } from 'zod'
+import { createMenuItemSchema, updateMenuItemSchema } from '@/lib/validation/menu.schema'
 
 export type MenuItem = {
-  id: string; name: string; category: string | null; price: number
+  id: string; name: string; categoryId: string | null; category: { name: string } | null
+  price: number; preparationCost: number
   isAvailable: boolean; createdAt: string; updatedAt: string
+  recipeItems: { inventoryItemId: string; quantity: number; inventoryItem: { name: string; currentStock: number } }[]
 }
-export type CreateMenuItemInput = {
-  name: string; category?: string; price: number
-  recipe: { inventoryItemId: string; quantity: number }[]
-}
+export type CreateMenuItemInput = z.infer<typeof createMenuItemSchema>
+export type UpdateMenuItemInput = z.infer<typeof updateMenuItemSchema>
 
 export const getMenu = () => apiFetch<MenuItem[]>('/api/menu')
 export const createMenuItem = (data: CreateMenuItemInput) =>
   apiFetch<MenuItem>('/api/menu', { method: 'POST', body: JSON.stringify(data) })
-export const updateMenuItem = (id: string, data: Partial<Omit<CreateMenuItemInput, 'recipe'> & { isAvailable: boolean }>) =>
+export const updateMenuItem = (id: string, data: UpdateMenuItemInput) =>
   apiFetch<MenuItem>(`/api/menu/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deleteMenuItem = (id: string) =>
   apiFetch<void>(`/api/menu/${id}`, { method: 'DELETE' })

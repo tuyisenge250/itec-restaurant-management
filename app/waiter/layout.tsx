@@ -5,7 +5,7 @@ import { Separator } from '@/components/ui/separator'
 export default function WaiterLayout({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider>
-      <AppSidebar role="waiter" userName="Waiter User" />
+      <AppSidebar role="waiter" />
       <SidebarInset>
         <header className="flex h-12 items-center gap-2 border-b border-border bg-card/90 px-4 shadow-sm">
           <SidebarTrigger className="-ml-1" />

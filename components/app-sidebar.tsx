@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
 import Image from 'next/image'
 import { LogOut } from 'lucide-react'
 import {
@@ -17,14 +18,19 @@ import {
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
 import { navByRole, type Role } from '@/lib/nav-config'
+import { useCurrentUser } from '@/lib/api/auth'
 
-export function AppSidebar({ role, userName }: { role: Role; userName: string }) {
+export function AppSidebar({ role }: { role: Role }) {
   const pathname = usePathname()
+  const router = useRouter()
+  const queryClient = useQueryClient()
   const items = navByRole[role]
+  const { data: user } = useCurrentUser()
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' })
-    window.location.href = '/login'
+    queryClient.clear()
+    router.push('/login')
   }
 
   return (
@@ -68,7 +74,7 @@ export function AppSidebar({ role, userName }: { role: Role; userName: string })
 
       <SidebarFooter className="px-3 py-3">
         <div className="flex items-center justify-between rounded-md border border-border bg-card px-2.5 py-2 shadow-sm">
-          <span className="text-sm font-medium text-foreground">{userName}</span>
+          <span className="text-sm font-medium text-foreground">{user?.name ?? '…'}</span>
           <button
             onClick={handleLogout}
             className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"

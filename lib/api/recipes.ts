@@ -2,10 +2,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
 import { toast } from 'sonner'
 import type { z } from 'zod'
-import { updateRecipeSchema } from '@/lib/validation/purchase-order.schema'
+import { updateRecipeSchema } from '@/lib/validation/recipe.schema'
 
 export type RecipeBreakdown = {
-  menuItemId: string; name: string; price: number; cost: number; margin: number
+  menuItemId: string; name: string; price: number; preparationCost: number; cost: number; margin: number
   ingredients: { name: string; quantity: number; unit: string; unitCost: number; lineCost: number }[]
 }
 export type UpdateRecipeInput = z.infer<typeof updateRecipeSchema>
@@ -21,7 +21,11 @@ export function useUpdateRecipe() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ menuItemId, data }: { menuItemId: string; data: UpdateRecipeInput }) => updateRecipe(menuItemId, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['recipes'] }); toast.success('Recipe updated') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recipes'] })
+      qc.invalidateQueries({ queryKey: ['menu'] })
+      toast.success('Recipe updated')
+    },
     onError: (e: Error) => toast.error(e.message),
   })
 }

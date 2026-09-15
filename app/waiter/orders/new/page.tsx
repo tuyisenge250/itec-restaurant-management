@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Minus, Send, UtensilsCrossed, Loader2 } from 'lucide-react'
+import { Plus, Minus, Send, UtensilsCrossed, Loader2, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -10,8 +10,10 @@ import { Separator } from '@/components/ui/separator'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useMenu } from '@/lib/api/menu'
 import { useCreateOrder } from '@/lib/api/orders'
+import { rwf } from '@/lib/utils'
 
 type OrderLine = { id: string; name: string; price: number; qty: number }
 
@@ -22,8 +24,10 @@ export default function NewOrderPage() {
 
   const [lines, setLines] = useState<OrderLine[]>([])
   const [table, setTable] = useState('')
+  const [error, setError] = useState('')
 
   function addItem(item: { id: string; name: string; price: number }) {
+    setError('')
     setLines((prev) => {
       const existing = prev.find((l) => l.id === item.id)
       if (existing) return prev.map((l) => l.id === item.id ? { ...l, qty: l.qty + 1 } : l)
@@ -42,19 +46,28 @@ export default function NewOrderPage() {
   }
 
   async function handleSend() {
-    await createOrder.mutateAsync({
-      tableNumber: table || undefined,
-      items: lines.map((l) => ({ menuItemId: l.id, quantity: l.qty })),
-    })
-    router.push('/waiter/orders')
+    setError('')
+    if (!table.trim()) { setError('Enter a table before sending the order.'); return }
+    try {
+      const order = await createOrder.mutateAsync({
+        table: table.trim(),
+        items: lines.map((l) => ({ menuItemId: l.id, quantity: l.qty })),
+      })
+      router.push(`/waiter/orders/${order.id}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create the order.')
+    }
   }
 
-  const byCategory = menuItems.reduce<Record<string, typeof menuItems>>((acc, item) => {
-    const cat = item.category ?? 'Other'
-    acc[cat] = [...(acc[cat] ?? []), item]
-    return acc
-  }, {})
+  const byCategory = menuItems
+    .filter((i) => i.isAvailable)
+    .reduce<Record<string, typeof menuItems>>((acc, item) => {
+      const cat = item.category?.name ?? 'Other'
+      acc[cat] = [...(acc[cat] ?? []), item]
+      return acc
+    }, {})
 
+  const unavailable = menuItems.filter((i) => !i.isAvailable)
   const total = lines.reduce((s, l) => s + l.price * l.qty, 0)
 
   return (
@@ -71,12 +84,12 @@ export default function NewOrderPage() {
               <div key={category}>
                 <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">{category}</h2>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  {items.filter((i) => i.isAvailable).map((item) => (
+                  {items.map((item) => (
                     <Card key={item.id} className="cursor-pointer hover:bg-accent transition-colors" onClick={() => addItem(item)}>
                       <CardContent className="flex items-center justify-between p-4">
                         <div>
                           <p className="font-medium text-foreground">{item.name}</p>
-                          <p className="text-sm text-muted-foreground">${item.price.toFixed(2)}</p>
+                          <p className="text-sm text-muted-foreground">{rwf(item.price)}</p>
                         </div>
                         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground">
                           <Plus className="h-4 w-4" />
@@ -87,6 +100,23 @@ export default function NewOrderPage() {
                 </div>
               </div>
             ))}
+            {unavailable.length > 0 && (
+              <div>
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Out of stock</h2>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {unavailable.map((item) => (
+                    <Card key={item.id} className="cursor-not-allowed opacity-50">
+                      <CardContent className="flex items-center justify-between p-4">
+                        <div>
+                          <p className="font-medium text-foreground">{item.name}</p>
+                          <p className="text-sm text-destructive">Out of stock</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -94,7 +124,7 @@ export default function NewOrderPage() {
       <div className="flex w-72 shrink-0 flex-col gap-4 rounded-lg border border-border bg-card p-4">
         <h2 className="font-semibold text-foreground">Order summary</h2>
         <div className="flex flex-col gap-1.5">
-          <Label>Table number</Label>
+          <Label>Table</Label>
           <Input placeholder="T1" value={table} onChange={(e) => setTable(e.target.value)} />
         </div>
         <Separator />
@@ -117,7 +147,7 @@ export default function NewOrderPage() {
                     <Plus className="h-3 w-3" />
                   </button>
                 </div>
-                <span className="w-14 text-right text-sm">${(line.price * line.qty).toFixed(2)}</span>
+                <span className="w-16 text-right text-sm">{rwf(line.price * line.qty)}</span>
               </div>
             ))}
           </div>
@@ -125,11 +155,17 @@ export default function NewOrderPage() {
         <Separator />
         <div className="flex justify-between font-semibold">
           <span>Total</span>
-          <span>${total.toFixed(2)}</span>
+          <span>{rwf(total)}</span>
         </div>
+        {error && (
+          <Alert variant="destructive">
+            <AlertTriangle />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
         <Button className="w-full" disabled={lines.length === 0 || createOrder.isPending} onClick={handleSend}>
           {createOrder.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-          Send to kitchen
+          Create order
         </Button>
       </div>
     </div>

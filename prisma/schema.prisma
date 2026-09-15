@@ -26,34 +26,70 @@ model User {
     createdAt    DateTime @default(now())
     updatedAt    DateTime @updatedAt
 
-    purchaseOrders        PurchaseOrder[]        @relation("CreatedByUser")
-    inventoryTransactions InventoryTransaction[] @relation("RecordedByUser")
-    orders                Order[]                @relation("CreatedByWaiter")
-    payments              Payment[]              @relation("RecordedByUser")
+    purchaseOrdersCreated  PurchaseOrder[]        @relation("POCreatedBy")
+    purchaseOrdersApproved PurchaseOrder[]        @relation("POApprovedBy")
+    goodsReceipts          GoodsReceipt[]         @relation("ReceivedByUser")
+    inventoryTransactions  InventoryTransaction[] @relation("RecordedByUser")
+    prepProductionRuns     PrepProductionRun[]    @relation("PrepRecordedByUser")
+    orders                 Order[]                @relation("CreatedByWaiter")
+    preparedOrderItems     OrderItem[]            @relation("PreparedByKitchen")
+    voidedOrderItems       OrderItem[]            @relation("VoidedByUser")
+    payments               Payment[]              @relation("RecordedByUser")
+    refunds                Refund[]               @relation("RefundedByUser")
+    supplierNotes          SupplierNote[]         @relation("SupplierNoteAuthor")
+    auditLogs              AuditLog[]
 
     @@map("users")
 }
 
 // ─────────────────────────────────────────────
-// PROCUREMENT
+// SUPPLIER
 // ─────────────────────────────────────────────
 
 model Supplier {
-    id        String   @id @default(cuid())
-    name      String
-    phone     String?
-    email     String?
-    address   String?
-    isActive  Boolean  @default(true)
-    createdAt DateTime @default(now())
+    id           String   @id @default(cuid())
+    name         String
+    phone        String?
+    email        String?
+    address      String?
+    paymentTerms String? // e.g. "Net 30", "COD"
+    isActive     Boolean  @default(true)
+    createdAt    DateTime @default(now())
 
     purchaseOrders PurchaseOrder[]
+    inventoryLots  InventoryLot[] // denormalized for fast "price history per supplier per item" queries
+    notes          SupplierNote[]
 
     @@map("suppliers")
 }
 
+// Performance notes: late deliveries, quality issues, etc.
+enum SupplierNoteType {
+    late_delivery
+    quality_issue
+    general
+}
+
+model SupplierNote {
+    id         String           @id @default(cuid())
+    supplierId String
+    supplier   Supplier         @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+    type       SupplierNoteType @default(general)
+    note       String
+    authorId   String
+    author     User             @relation("SupplierNoteAuthor", fields: [authorId], references: [id])
+    createdAt  DateTime         @default(now())
+
+    @@map("supplier_notes")
+}
+
+// ─────────────────────────────────────────────
+// PROCUREMENT (Purchase Order process)
+// ─────────────────────────────────────────────
+
 enum PurchaseOrderStatus {
     draft
+    pending_approval
     ordered
     partially_received
     received
@@ -61,17 +97,24 @@ enum PurchaseOrderStatus {
 }
 
 model PurchaseOrder {
-    id          String              @id @default(cuid())
-    supplierId  String
-    supplier    Supplier            @relation(fields: [supplierId], references: [id])
-    status      PurchaseOrderStatus @default(draft)
-    createdById String
-    createdBy   User                @relation("CreatedByUser", fields: [createdById], references: [id])
-    notes       String?
-    createdAt   DateTime            @default(now())
-    updatedAt   DateTime            @updatedAt
+    id              String              @id @default(cuid())
+    supplierId      String
+    supplier        Supplier            @relation(fields: [supplierId], references: [id])
+    status          PurchaseOrderStatus @default(draft)
+    createdById     String
+    createdBy       User                @relation("POCreatedBy", fields: [createdById], references: [id])
+    approvedById    String?
+    approvedBy      User?               @relation("POApprovedBy", fields: [approvedById], references: [id])
+    approvedAt      DateTime?
+    reorderedFromId String? // "reorder from a previous PO"
+    reorderedFrom   PurchaseOrder?      @relation("POReorder", fields: [reorderedFromId], references: [id])
+    reorderedInto   PurchaseOrder[]     @relation("POReorder")
+    notes           String?
+    createdAt       DateTime            @default(now())
+    updatedAt       DateTime            @updatedAt
 
-    items PurchaseOrderItem[]
+    items         PurchaseOrderItem[]
+    goodsReceipts GoodsReceipt[]
 
     @@map("purchase_orders")
 }
@@ -83,69 +126,215 @@ model PurchaseOrderItem {
     inventoryItemId  String
     inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
     quantityOrdered  Float
-    quantityReceived Float         @default(0)
-    unitCost         Float // cost at time of ordering
+    quantityReceived Float         @default(0) // running total, kept in sync with GoodsReceiptLine
+    unitCost         Float // cost at time of ordering — becomes the lot's cost on receipt unless overridden
+
+    goodsReceiptLines GoodsReceiptLine[]
 
     @@map("purchase_order_items")
 }
 
+// A receipt event against a PO — supports partial or full goods receipt.
+// Each line creates (or adds to) an InventoryLot, tagged with a costing method at receipt time.
+model GoodsReceipt {
+    id              String        @id @default(cuid())
+    purchaseOrderId String
+    purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+    receivedById    String
+    receivedBy      User          @relation("ReceivedByUser", fields: [receivedById], references: [id])
+    receivedAt      DateTime      @default(now())
+    notes           String?
+
+    lines GoodsReceiptLine[]
+
+    @@map("goods_receipts")
+}
+
+model GoodsReceiptLine {
+    id                  String            @id @default(cuid())
+    goodsReceiptId      String
+    goodsReceipt        GoodsReceipt      @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+    purchaseOrderItemId String
+    purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id])
+    quantityReceived    Float
+    unitCost            Float // actual price paid for this batch — may differ from PO's expected unitCost
+    costingMethod       CostingMethod // admin tags this batch FIFO or LIFO at receipt time
+    inventoryLotId      String            @unique
+    inventoryLot        InventoryLot      @relation(fields: [inventoryLotId], references: [id])
+
+    @@map("goods_receipt_lines")
+}
+
 // ─────────────────────────────────────────────
-// INVENTORY (immutable ledger pattern)
+// STOCK / INVENTORY (lot-based, no averaged cost)
 // ─────────────────────────────────────────────
+
+enum InventoryItemType {
+    raw // purchased directly from suppliers
+    prepared // produced in-house via a PrepRecipe (sub-recipe / prepared item)
+}
 
 model InventoryItem {
-    id           String   @id @default(cuid())
+    id           String            @id @default(cuid())
     name         String
     unit         String // "kg", "l", "pcs", etc.
-    currentStock Float    @default(0) // denormalized cache — source of truth is InventoryTransaction
-    avgUnitCost  Float    @default(0) // weighted-average cost, updated on receipt
-    reorderLevel Float    @default(0)
-    createdAt    DateTime @default(now())
-    updatedAt    DateTime @updatedAt
+    itemType     InventoryItemType @default(raw)
+    currentStock Float             @default(0) // denormalized cache = sum of lot.quantityRemaining, source of truth is lots
+    reorderLevel Float             @default(0)
+    isActive     Boolean           @default(true) // deactivation is the real "delete" — history is never destroyed
+    createdAt    DateTime          @default(now())
+    updatedAt    DateTime          @updatedAt
 
     purchaseOrderItems    PurchaseOrderItem[]
-    recipeItems           RecipeItem[]
+    lots                  InventoryLot[]
     inventoryTransactions InventoryTransaction[]
+    recipeItems           RecipeItem[] // used as an ingredient in a MenuItem BOM
+
+    // Sub-recipe / two-level BOM support:
+    prepRecipe       PrepRecipe?      @relation("PrepRecipeOutput") // if itemType = prepared, this is how it's made
+    prepRecipeInputs PrepRecipeItem[] // if this item is used as a raw input to *other* prepared items
 
     @@map("inventory_items")
 }
 
-enum InventoryTransactionType {
-    receipt // from purchase order
-    consumption // deducted on order fulfillment
-    waste // spoilage / manual write-off
-    adjustment // manual correction
+enum CostingMethod {
+    fifo
+    lifo
 }
 
+// A single priced batch/lot. Every receipt (purchase or prep production) creates one.
+// Costing is never averaged — each lot keeps its own real price.
+model InventoryLot {
+    id                String        @id @default(cuid())
+    inventoryItemId   String
+    inventoryItem     InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+    supplierId        String? // null for in-house prepared-item lots
+    supplier          Supplier?     @relation(fields: [supplierId], references: [id])
+    costingMethod     CostingMethod // determines draw-down priority: LIFO lots drawn before FIFO lots
+    unitCost          Float // the actual price paid (or computed prep cost) for this lot
+    quantityReceived  Float
+    quantityRemaining Float // decremented as this lot is consumed/wasted/adjusted
+    receivedAt        DateTime      @default(now())
+    notes             String?
+
+    goodsReceiptLine      GoodsReceiptLine?
+    prepProductionRun     PrepProductionRun?     @relation("ProducedLot")
+    inventoryTransactions InventoryTransaction[]
+
+    @@index([inventoryItemId, costingMethod, receivedAt])
+    @@map("inventory_lots")
+}
+
+enum InventoryTransactionType {
+    receipt // from purchase order goods receipt, or prep production output
+    consumption // deducted on order fulfillment or prep production input
+    waste // spoilage / manual write-off — always lot-specific
+    adjustment // manual correction, requires a reason code
+}
+
+// Source of the transaction, for audit/reporting (COGS per order, waste report, etc.)
+enum InventoryTransactionSource {
+    purchase_order
+    sale
+    prep_production
+    waste
+    manual_adjustment
+}
+
+// Immutable ledger — every receipt, consumption, waste, and adjustment, tied to the specific lot affected.
 model InventoryTransaction {
-    id              String                   @id @default(cuid())
+    id              String                     @id @default(cuid())
     inventoryItemId String
-    inventoryItem   InventoryItem            @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+    inventoryItem   InventoryItem              @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+    lotId           String
+    lot             InventoryLot               @relation(fields: [lotId], references: [id])
     type            InventoryTransactionType
-    quantity        Float // positive for receipt, negative for consumption/waste
-    unitCost        Float? // cost basis at time of transaction (for receipts)
-    referenceId     String? // e.g. orderId or purchaseOrderId, for traceability
+    source          InventoryTransactionSource
+    quantity        Float // positive for receipt, negative for consumption/waste/adjustment
+    unitCost        Float // cost basis of the lot at time of transaction, for COGS traceability
+    referenceId     String? // orderId, orderItemId, purchaseOrderId, prepProductionRunId, etc.
+    reasonCode      String? // required for manual adjustments
     recordedById    String
-    recordedBy      User                     @relation("RecordedByUser", fields: [recordedById], references: [id])
+    recordedBy      User                       @relation("RecordedByUser", fields: [recordedById], references: [id])
     notes           String?
-    createdAt       DateTime                 @default(now())
+    createdAt       DateTime                   @default(now())
 
     @@index([inventoryItemId, createdAt])
+    @@index([lotId])
     @@map("inventory_transactions")
 }
 
 // ─────────────────────────────────────────────
-// RECIPES / MENU
+// SUB-RECIPES / YIELD (raw material → prepared item)
+// e.g. 10kg raw potatoes → N portions of prepped chips
 // ─────────────────────────────────────────────
 
+model PrepRecipe {
+    id             String        @id @default(cuid())
+    outputItemId   String        @unique // the prepared InventoryItem this recipe produces
+    outputItem     InventoryItem @relation("PrepRecipeOutput", fields: [outputItemId], references: [id])
+    yieldQuantity  Float // expected output quantity per production run, in outputItem's unit
+    batchInputNote String? // e.g. "based on 10kg raw potatoes"
+    createdAt      DateTime      @default(now())
+    updatedAt      DateTime      @updatedAt
+
+    inputs         PrepRecipeItem[]
+    productionRuns PrepProductionRun[]
+
+    @@map("prep_recipes")
+}
+
+model PrepRecipeItem {
+    id           String        @id @default(cuid())
+    prepRecipeId String
+    prepRecipe   PrepRecipe    @relation(fields: [prepRecipeId], references: [id], onDelete: Cascade)
+    inputItemId  String // raw or another prepared InventoryItem
+    inputItem    InventoryItem @relation(fields: [inputItemId], references: [id])
+    quantity     Float // amount of inputItem used per one production run (batch)
+
+    @@unique([prepRecipeId, inputItemId])
+    @@map("prep_recipe_items")
+}
+
+// A single production event: consumes input lots (per FIFO/LIFO rule), produces one output lot.
+model PrepProductionRun {
+    id               String       @id @default(cuid())
+    prepRecipeId     String
+    prepRecipe       PrepRecipe   @relation(fields: [prepRecipeId], references: [id])
+    quantityProduced Float
+    laborCost        Float        @default(0) // optional manual prep-labor cost folded into output lot's unitCost
+    producedLotId    String       @unique
+    producedLot      InventoryLot @relation("ProducedLot", fields: [producedLotId], references: [id])
+    recordedById     String
+    recordedBy       User         @relation("PrepRecordedByUser", fields: [recordedById], references: [id])
+    createdAt        DateTime     @default(now())
+
+    @@map("prep_production_runs")
+}
+
+// ─────────────────────────────────────────────
+// MENU & RECIPE (bridges Stock → Kitchen)
+// ─────────────────────────────────────────────
+
+model MenuCategory {
+    id        String     @id @default(cuid())
+    name      String
+    sortOrder Int        @default(0)
+    menuItems MenuItem[]
+
+    @@map("menu_categories")
+}
+
 model MenuItem {
-    id          String   @id @default(cuid())
-    name        String
-    category    String?
-    price       Float
-    isAvailable Boolean  @default(true)
-    createdAt   DateTime @default(now())
-    updatedAt   DateTime @updatedAt
+    id              String        @id @default(cuid())
+    name            String
+    categoryId      String?
+    category        MenuCategory? @relation(fields: [categoryId], references: [id])
+    price           Float
+    preparationCost Float         @default(0) // per-dish prep cost component, separate from raw ingredient cost
+    isAvailable     Boolean       @default(true) // auto-disabled by app logic when a required ingredient is out of stock
+    createdAt       DateTime      @default(now())
+    updatedAt       DateTime      @updatedAt
 
     recipeItems RecipeItem[]
     orderItems  OrderItem[]
@@ -153,11 +342,13 @@ model MenuItem {
     @@map("menu_items")
 }
 
+// Recipe/BOM: links a menu item to raw ingredients or prepared items + quantities.
+// Cost = sum(quantity * actual lot price of inventoryItem) + MenuItem.preparationCost
 model RecipeItem {
     id              String        @id @default(cuid())
     menuItemId      String
     menuItem        MenuItem      @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
-    inventoryItemId String
+    inventoryItemId String // may be raw or prepared (two-level BOM)
     inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
     quantity        Float // amount of inventory item used per one menu item unit
 
@@ -166,12 +357,12 @@ model RecipeItem {
 }
 
 // ─────────────────────────────────────────────
-// ORDERS
+// ORDERS (Waiter / Kitchen)
 // ─────────────────────────────────────────────
 
 enum OrderStatus {
-    pending
-    preparing
+    pending // waiter can still add/edit/remove items
+    preparing // sent to kitchen — item edits locked for waiter; kitchen can still void an item
     ready
     served
     paid
@@ -180,12 +371,28 @@ enum OrderStatus {
 
 model Order {
     id          String      @id @default(cuid())
-    tableNumber String?
+    table       String
     status      OrderStatus @default(pending)
     createdById String
     createdBy   User        @relation("CreatedByWaiter", fields: [createdById], references: [id])
-    createdAt   DateTime    @default(now())
-    updatedAt   DateTime    @updatedAt
+
+    // Split bill: a split creates new child orders carrying a subset of items
+    splitFromId String?
+    splitFrom   Order?  @relation("OrderSplit", fields: [splitFromId], references: [id])
+    splitInto   Order[] @relation("OrderSplit")
+
+    // Merge: a merged-away order points at the order it was merged into and is cancelled
+    mergedIntoId String?
+    mergedInto   Order?  @relation("OrderMerge", fields: [mergedIntoId], references: [id])
+    mergedFrom   Order[] @relation("OrderMerge")
+
+    discountPercent Float? // discount applied pre-payment, subject to role-based limits (app-enforced)
+    discountAmount  Float?
+    discountReason  String?
+
+    receiptNumber String?  @unique
+    createdAt     DateTime @default(now())
+    updatedAt     DateTime @updatedAt
 
     items    OrderItem[]
     payments Payment[]
@@ -201,26 +408,100 @@ model OrderItem {
     menuItem    MenuItem @relation(fields: [menuItemId], references: [id])
     quantity    Int
     priceAtSale Float // menu price snapshot at time of order
-    costAtSale  Float // recipe cost snapshot at time of order — critical for accurate historical profit
+    costAtSale  Float // recipe cost snapshot (ingredient cost from actual lots + prep cost) — for per-order COGS
+
+    // Kitchen fulfillment / chef activity tracking
+    preparedById String?
+    preparedBy   User?     @relation("PreparedByKitchen", fields: [preparedById], references: [id])
+    preparedAt   DateTime?
+
+    // Kitchen-side void, allowed only once status has passed `pending`
+    isVoided   Boolean   @default(false)
+    voidedById String?
+    voidedBy   User?     @relation("VoidedByUser", fields: [voidedById], references: [id])
+    voidedAt   DateTime?
+    voidReason String?
 
     @@map("order_items")
 }
 
 // ─────────────────────────────────────────────
-// PAYMENTS (manual for demo — gateway-agnostic)
+// PAYMENTS
 // ─────────────────────────────────────────────
 
+enum PaymentMethod {
+    cash
+    card
+    momo
+    other
+}
+
 model Payment {
-    id           String   @id @default(cuid())
+    id           String        @id @default(cuid())
     orderId      String
-    order        Order    @relation(fields: [orderId], references: [id])
-    method       String // "cash" | "card" | "upi" | "other" — plain string, no gateway coupling
+    order        Order         @relation(fields: [orderId], references: [id])
+    method       PaymentMethod
     amount       Float
-    discount     Float    @default(0)
-    notes        String?
+    discount     Float         @default(0) // discount applied at payment time
     recordedById String
-    recordedBy   User     @relation("RecordedByUser", fields: [recordedById], references: [id])
-    createdAt    DateTime @default(now())
+    recordedBy   User          @relation("RecordedByUser", fields: [recordedById], references: [id])
+    notes        String?
+    createdAt    DateTime      @default(now())
+
+    refunds Refund[]
 
     @@map("payments")
+}
+
+model Refund {
+    id           String   @id @default(cuid())
+    paymentId    String
+    payment      Payment  @relation(fields: [paymentId], references: [id])
+    amount       Float // full refund = payment.amount; partial = less
+    reason       String?
+    recordedById String
+    recordedBy   User     @relation("RefundedByUser", fields: [recordedById], references: [id])
+    createdAt    DateTime @default(now())
+
+    @@map("refunds")
+}
+
+// ─────────────────────────────────────────────
+// REPORTING
+// ─────────────────────────────────────────────
+
+// Snapshot stored at end-of-day close-out; most other reports (revenue, COGS,
+// profit by item/day, waste cost) are computed on demand from the models above.
+model DailyCloseOut {
+    id             String   @id @default(cuid())
+    businessDate   DateTime @unique @db.Date
+    totalRevenue   Float
+    totalCOGS      Float
+    totalWasteCost Float
+    cashTotal      Float
+    cardTotal      Float
+    momoTotal      Float
+    otherTotal     Float
+    createdAt      DateTime @default(now())
+
+    @@map("daily_close_outs")
+}
+
+// ─────────────────────────────────────────────
+// CROSS-CUTTING
+// ─────────────────────────────────────────────
+
+model AuditLog {
+    id         String   @id @default(cuid())
+    userId     String?
+    user       User?    @relation(fields: [userId], references: [id])
+    action     String // e.g. "purchase_order.approved", "order_item.voided"
+    entityType String
+    entityId   String
+    beforeData Json?
+    afterData  Json?
+    createdAt  DateTime @default(now())
+
+    @@index([entityType, entityId])
+    @@map("audit_logs")
 }

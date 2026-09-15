@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireUser } from '@/lib/auth/session'
+import { requireRole } from '@/lib/auth/session'
 import { createOrderSchema } from '@/lib/validation/order.schema'
 import { createOrder } from '@/lib/services/order.service'
 import { prisma } from '@/lib/db/prisma'
@@ -7,11 +7,7 @@ import { handleApiError } from '@/lib/api-error'
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireUser()
-    if (user.role !== 'waiter' && user.role !== 'admin') {
-      return NextResponse.json({ error: 'Not authorized for this action' }, { status: 403 })
-    }
-
+    const user = await requireRole('waiter', 'admin')
     const body = createOrderSchema.parse(await req.json())
     const order = await createOrder({ ...body, createdById: user.sub })
 
@@ -23,7 +19,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   try {
-    await requireUser() // any authenticated role can list orders (admin/kitchen/waiter)
+    await requireRole('admin', 'kitchen', 'waiter')
 
     const orders = await prisma.order.findMany({
       orderBy: { createdAt: 'desc' },

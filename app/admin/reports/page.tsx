@@ -2,14 +2,16 @@
 
 import { useState } from 'react'
 import { Banknote, TrendingUp, TrendingDown, Percent, Trash2 } from 'lucide-react'
+import type { DateRange } from 'react-day-picker'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatCard } from '@/components/ui/stat-card'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { DateRangePicker } from '@/components/date-range-picker'
+import { ProfitTrendChart } from '@/components/profit-trend-chart'
+import { ProfitByItemChart } from '@/components/profit-by-item-chart'
 import { useProfitReport } from '@/lib/api/reports'
 import { rwf } from '@/lib/utils'
 
@@ -21,13 +23,17 @@ const today = new Date()
 const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
 
 export default function ReportsPage() {
-  const [from, setFrom] = useState(toDateInput(firstOfMonth))
-  const [to, setTo] = useState(toDateInput(today))
+  const [range, setRange] = useState<DateRange | undefined>({ from: firstOfMonth, to: today })
   const [applied, setApplied] = useState({ from: toDateInput(firstOfMonth), to: toDateInput(today) })
 
   const { data, isLoading } = useProfitReport(applied.from, applied.to)
 
   const s = data?.summary
+
+  function handleApply() {
+    if (!range?.from) return
+    setApplied({ from: toDateInput(range.from), to: toDateInput(range.to ?? range.from) })
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -35,15 +41,8 @@ export default function ReportsPage() {
 
       <Card>
         <CardContent className="flex flex-wrap items-end gap-4 p-4">
-          <div className="flex flex-col gap-1.5">
-            <Label>From</Label>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40" />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>To</Label>
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40" />
-          </div>
-          <Button onClick={() => setApplied({ from, to })}>Apply</Button>
+          <DateRangePicker value={range} onChange={setRange} />
+          <Button onClick={handleApply}>Apply</Button>
         </CardContent>
       </Card>
 
@@ -51,6 +50,10 @@ export default function ReportsPage() {
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Skeleton className="h-72 w-full lg:col-span-2" />
+            <Skeleton className="h-72 w-full" />
           </div>
           <Skeleton className="h-64 w-full" />
         </div>
@@ -61,6 +64,22 @@ export default function ReportsPage() {
             <StatCard icon={TrendingDown} label="COGS"    value={rwf(s.cogs)} />
             <StatCard icon={TrendingUp}   label="Profit"  value={rwf(s.profit)} />
             <StatCard icon={Percent}      label="Margin"  value={`${s.marginPct.toFixed(1)}%`} />
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card className="lg:col-span-2">
+              <CardHeader className="pb-3"><CardTitle className="text-base">Profit trend</CardTitle></CardHeader>
+              <CardContent>
+                <ProfitTrendChart data={data.trend} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-base">Profit by item</CardTitle></CardHeader>
+              <CardContent>
+                <ProfitByItemChart items={data.byItem} />
+              </CardContent>
+            </Card>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-3">

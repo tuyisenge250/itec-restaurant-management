@@ -7,8 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { ProfitByItemChart } from '@/components/profit-by-item-chart'
 import { useOrders } from '@/lib/api/orders'
 import { useInventory } from '@/lib/api/inventory'
+import { rwf } from '@/lib/utils'
 
 function minutesAgo(iso: string) {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
@@ -20,10 +22,21 @@ export default function AdminDashboard() {
 
   const today = new Date().toDateString()
   const todayPaid = orders.filter((o) => o.status === 'paid' && new Date(o.updatedAt).toDateString() === today)
-  const revenue = todayPaid.reduce((s, o) => s + o.items.reduce((a, i) => a + i.priceAtSale * i.quantity, 0), 0)
-  const profit  = todayPaid.reduce((s, o) => s + o.items.reduce((a, i) => a + (i.priceAtSale - i.costAtSale) * i.quantity, 0), 0)
+  const soldItems = (o: (typeof orders)[number]) => o.items.filter((i) => !i.isVoided)
+  const revenue = todayPaid.reduce((s, o) => s + soldItems(o).reduce((a, i) => a + i.priceAtSale * i.quantity, 0), 0)
+  const profit  = todayPaid.reduce((s, o) => s + soldItems(o).reduce((a, i) => a + (i.priceAtSale - i.costAtSale) * i.quantity, 0), 0)
   const active  = orders.filter((o) => ['pending', 'preparing', 'ready', 'served'].includes(o.status))
   const lowStock = inventory.filter((i) => i.currentStock <= i.reorderLevel)
+
+  const itemProfit = new Map<string, { name: string; profit: number }>()
+  for (const o of todayPaid) {
+    for (const i of soldItems(o)) {
+      const existing = itemProfit.get(i.menuItemId) ?? { name: i.menuItem.name, profit: 0 }
+      existing.profit += (i.priceAtSale - i.costAtSale) * i.quantity
+      itemProfit.set(i.menuItemId, existing)
+    }
+  }
+  const profitByItem = Array.from(itemProfit.values()).sort((a, b) => b.profit - a.profit)
 
   return (
     <div className="flex flex-col gap-6">
@@ -34,16 +47,27 @@ export default function AdminDashboard() {
           Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)
         ) : (
           <>
-            <StatCard icon={DollarSign}    label="Today's revenue" value={`$${revenue.toFixed(2)}`} />
-            <StatCard icon={TrendingUp}    label="Today's profit"  value={`$${profit.toFixed(2)}`} />
+            <StatCard icon={DollarSign}    label="Today's revenue" value={rwf(revenue)} />
+            <StatCard icon={TrendingUp}    label="Today's profit"  value={rwf(profit)} />
             <StatCard icon={ShoppingBag}   label="Active orders"   value={String(active.length)} />
             <StatCard icon={AlertTriangle} label="Low stock items" value={String(lowStock.length)} />
           </>
         )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-3">
         <Card>
+          <CardHeader className="pb-3"><CardTitle className="text-base">Profit by item (today)</CardTitle></CardHeader>
+          <CardContent>
+            {ordersLoading ? (
+              <Skeleton className="h-64 w-full" />
+            ) : (
+              <ProfitByItemChart items={profitByItem} />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
           <CardHeader className="pb-3"><CardTitle className="text-base">Active orders</CardTitle></CardHeader>
           <CardContent className="p-0">
             {ordersLoading ? (
@@ -65,7 +89,7 @@ export default function AdminDashboard() {
                 <TableBody>
                   {active.map((o) => (
                     <TableRow key={o.id} className="hover:bg-accent">
-                      <TableCell className="font-medium">{o.tableNumber ?? '—'}</TableCell>
+                      <TableCell className="font-medium">{o.table}</TableCell>
                       <TableCell>{o.items.length}</TableCell>
                       <TableCell><StatusBadge status={o.status} /></TableCell>
                       <TableCell className="text-right text-muted-foreground">{minutesAgo(o.createdAt)}m</TableCell>

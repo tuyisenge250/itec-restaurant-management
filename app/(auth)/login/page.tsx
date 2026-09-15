@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import { Eye, EyeOff, Loader2, ShieldCheck, ChefHat, ConciergeBell } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -22,6 +22,8 @@ const roleRedirect: Record<string, string> = {
 
 export default function LoginPage() {
   const router      = useRouter()
+  const searchParams = useSearchParams()
+  const next        = searchParams.get('next')
   const emailRef    = useRef<HTMLInputElement>(null)
   const passwordRef = useRef<HTMLInputElement>(null)
   const [showPassword, setShowPassword] = useState(false)
@@ -43,7 +45,7 @@ export default function LoginPage() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? 'Login failed'); return }
-      router.push(roleRedirect[data.role] ?? '/')
+      router.push(next && next.startsWith('/') ? next : (roleRedirect[data.role] ?? '/'))
     } catch {
       setError('Network error. Please try again.')
     } finally {

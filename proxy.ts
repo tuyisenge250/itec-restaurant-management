@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { jwtVerify } from 'jose'
-
-const secret = new TextEncoder().encode(process.env.JWT_SECRET)
+import { verifyToken } from '@/lib/auth/jwt'
 
 const roleRoutes: Record<string, string> = {
   '/admin': 'admin',
@@ -9,15 +7,21 @@ const roleRoutes: Record<string, string> = {
   '/waiter': 'waiter',
 }
 
+function redirectToLogin(req: NextRequest) {
+  const loginUrl = new URL('/login', req.url)
+  loginUrl.searchParams.set('next', req.nextUrl.pathname)
+  return NextResponse.redirect(loginUrl)
+}
+
 export default async function proxy(req: NextRequest) {
   const token = req.cookies.get('token')?.value
 
   if (!token) {
-    return NextResponse.redirect(new URL('/login', req.url))
+    return redirectToLogin(req)
   }
 
   try {
-    const { payload } = await jwtVerify(token, secret)
+    const payload = await verifyToken(token)
     const matchedPrefix = Object.keys(roleRoutes).find((p) =>
       req.nextUrl.pathname.startsWith(p)
     )
@@ -28,7 +32,7 @@ export default async function proxy(req: NextRequest) {
 
     return NextResponse.next()
   } catch {
-    return NextResponse.redirect(new URL('/login', req.url))
+    return redirectToLogin(req)
   }
 }
 

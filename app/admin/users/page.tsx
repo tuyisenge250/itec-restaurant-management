@@ -160,6 +160,7 @@ export default function UsersPage() {
             <div className="flex flex-col gap-1.5">
               <Label>Role</Label>
               <Select
+                items={{ admin: 'Admin', kitchen: 'Kitchen', waiter: 'Waiter' }}
                 defaultValue={editing?.role}
                 onValueChange={(v) => setValue('role', v as CreateFormValues['role'])}
               >

@@ -1,20 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
+import { Prisma } from '@prisma/client'
 import { requireUser, requireRole } from '@/lib/auth/session'
+import { updateMenuItemSchema } from '@/lib/validation/menu.schema'
+import { writeAuditLog } from '@/lib/audit'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
+import { ConflictError } from '@/lib/errors'
 
-const updateMenuItemSchema = z.object({
-  name: z.string().min(1).optional(),
-  category: z.string().optional(),
-  price: z.number().positive().optional(),
-  isAvailable: z.boolean().optional(),
-})
-
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     await requireUser()
     const { id } = await params
@@ -28,32 +21,52 @@ export async function GET(
   }
 }
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole('admin')
+    const user = await requireRole('admin')
     const { id } = await params
     const body = updateMenuItemSchema.parse(await req.json())
-    const item = await prisma.menuItem.update({ where: { id }, data: body })
+
+    const item = await prisma.$transaction(async (tx) => {
+      const before = await tx.menuItem.findUniqueOrThrow({ where: { id } })
+      const after = await tx.menuItem.update({ where: { id }, data: body })
+
+      if (body.price !== undefined && body.price !== before.price) {
+        await writeAuditLog(tx, {
+          userId: user.sub,
+          action: 'menu_item.price_changed',
+          entityType: 'MenuItem',
+          entityId: id,
+          beforeData: before,
+          afterData: after,
+        })
+      }
+
+      return after
+    })
+
     return NextResponse.json(item)
   } catch (err) {
     return handleApiError(err)
   }
 }
 
-// Soft delete — marks unavailable instead of hard delete to preserve order history
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+// isAvailable is a fully auto-recomputed stock flag now (see menu.service),
+// so there's no separate "deactivated" state to soft-delete into. A menu
+// item with order history can't be deleted at all — the FK from OrderItem
+// protects it — everything else is a real delete.
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     await requireRole('admin')
     const { id } = await params
-    await prisma.menuItem.update({ where: { id }, data: { isAvailable: false } })
+    await prisma.menuItem.delete({ where: { id } })
     return new NextResponse(null, { status: 204 })
   } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+      return handleApiError(
+        new ConflictError('Cannot delete a menu item that already has order history')
+      )
+    }
     return handleApiError(err)
   }
 }
