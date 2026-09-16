@@ -13,3 +13,12 @@ export const refundPaymentSchema = z.object({
   amount: z.number().positive(),
   reason: z.string().min(1),
 })
+
+export const requestRefundSchema = z.object({
+  amount: z.number().positive(),
+  reason: z.string().min(1),
+})
+
+export const denyRefundRequestSchema = z.object({
+  denialReason: z.string().optional(),
+})

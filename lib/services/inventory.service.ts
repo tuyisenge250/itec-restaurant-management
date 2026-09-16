@@ -272,6 +272,57 @@ export async function logWaste(
 }
 
 /**
+ * Corrects a lot's unit cost (e.g. the receiving price was entered wrong).
+ * No stock moves, so it's logged as a zero-quantity adjustment transaction —
+ * separate from adjustStock, which exists specifically to reject zero deltas
+ * for quantity corrections.
+ */
+export async function adjustLotPrice(
+  tx: TxClient,
+  params: {
+    lotId: string
+    newUnitCost: number
+    reasonCode: string
+    recordedById: string
+    notes?: string
+  }
+) {
+  const { lotId, newUnitCost, reasonCode, recordedById, notes } = params
+  if (!reasonCode) throw new BusinessRuleError('A reason code is required for price corrections')
+  if (newUnitCost <= 0) throw new BusinessRuleError('Unit cost must be positive')
+
+  const [lot] = await tx.$queryRaw<
+    { id: string; inventoryItemId: string; unitCost: number }[]
+  >`
+    SELECT id, "inventoryItemId", "unitCost" FROM inventory_lots
+    WHERE id = ${lotId}
+    FOR UPDATE
+  `
+  if (!lot) throw new NotFoundError('Inventory lot not found')
+  if (newUnitCost === lot.unitCost) {
+    throw new BusinessRuleError('New unit cost is the same as the current unit cost')
+  }
+
+  await tx.inventoryLot.update({
+    where: { id: lotId },
+    data: { unitCost: newUnitCost },
+  })
+  await tx.inventoryTransaction.create({
+    data: {
+      inventoryItemId: lot.inventoryItemId,
+      lotId,
+      type: 'adjustment',
+      source: 'manual_adjustment',
+      quantity: 0,
+      unitCost: newUnitCost,
+      reasonCode,
+      recordedById,
+      notes: `Unit cost corrected from ${lot.unitCost} to ${newUnitCost}${notes ? ` — ${notes}` : ''}`,
+    },
+  })
+}
+
+/**
  * Manual stock correction against one specific lot. Positive = found stock,
  * negative = correction — either way requires a reason code, and a negative
  * adjustment can never take a lot below zero remaining.

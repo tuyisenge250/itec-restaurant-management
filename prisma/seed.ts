@@ -43,15 +43,6 @@ async function main() {
     },
   })
 
-  await prisma.supplierNote.create({
-    data: {
-      supplierId: supplier.id,
-      type: 'general',
-      note: 'Reliable weekly delivery, good produce quality.',
-      authorId: admin.id,
-    },
-  })
-
   const flour = await prisma.inventoryItem.create({
     data: { name: 'Flour', unit: 'kg', reorderLevel: 10 },
   })

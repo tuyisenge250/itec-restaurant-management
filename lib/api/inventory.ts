@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
 import { toast } from 'sonner'
 import type { z } from 'zod'
-import { logWasteSchema, adjustStockSchema } from '@/lib/validation/inventory.schema'
+import { logWasteSchema, adjustStockSchema, adjustLotPriceSchema } from '@/lib/validation/inventory.schema'
 
 export type InventoryItem = {
   id: string
@@ -19,6 +19,7 @@ export type InventoryItem = {
 export type CreateInventoryInput = { name: string; unit: string; reorderLevel?: number }
 export type LogWasteInput = z.infer<typeof logWasteSchema>
 export type AdjustStockInput = z.infer<typeof adjustStockSchema>
+export type AdjustLotPriceInput = z.infer<typeof adjustLotPriceSchema>
 export type InventoryLot = {
   id: string
   inventoryItemId: string
@@ -31,6 +32,27 @@ export type InventoryLot = {
   receivedAt: string
   notes: string | null
 }
+export type InventoryTransactionReference =
+  | {
+      kind: 'order'
+      orderId: string
+      table: string
+      orderStatus: string
+      orderCreatedAt: string
+      waiterName: string
+      menuItemName: string
+      quantitySold: number
+      priceAtSale: number
+      costAtSale: number
+      preparedByName: string | null
+      preparedAt: string | null
+      isVoided: boolean
+      voidReason: string | null
+    }
+  | { kind: 'purchase_order'; purchaseOrderId: string; supplierName: string; status: string }
+  | { kind: 'prep_recipe'; prepRecipeId: string; outputItemName: string }
+  | null
+
 export type InventoryTransaction = {
   id: string
   inventoryItemId: string
@@ -44,8 +66,18 @@ export type InventoryTransaction = {
   notes: string | null
   createdAt: string
   recordedBy: { name: string }
+  reference: InventoryTransactionReference
 }
 export type WasteLogEntry = InventoryTransaction & { inventoryItem: { name: string; unit: string } }
+
+export type LimitingIngredient = { name: string; unit: string } | null
+export type ProducibleReport = {
+  menuItems: { menuItemId: string; menuItemName: string; maxUnits: number; limitingIngredient: LimitingIngredient }[]
+  prepRecipes: {
+    prepRecipeId: string; outputItemName: string; outputUnit: string
+    maxBatches: number; estimatedOutputQuantity: number; limitingIngredient: LimitingIngredient
+  }[]
+}
 
 export const getInventory = () => apiFetch<InventoryItem[]>('/api/inventory')
 export const getInventoryLots = (itemId: string) => apiFetch<InventoryLot[]>(`/api/inventory/${itemId}/lots`)
@@ -54,12 +86,19 @@ export const getInventoryTransactions = (itemId: string, params?: { type?: strin
   return apiFetch<InventoryTransaction[]>(`/api/inventory/${itemId}/transactions${qs ? `?${qs}` : ''}`)
 }
 export const getWasteLog = () => apiFetch<WasteLogEntry[]>('/api/inventory/waste')
+export const getProducible = (itemId: string) => apiFetch<ProducibleReport>(`/api/inventory/${itemId}/producible`)
+export const getIngredientUsage = (date?: string) =>
+  apiFetch<{ inventoryItemId: string; name: string; unit: string; totalUsed: number }[]>(
+    `/api/inventory/usage${date ? `?date=${date}` : ''}`
+  )
 export const createInventoryItem = (data: CreateInventoryInput) =>
   apiFetch<InventoryItem>('/api/inventory', { method: 'POST', body: JSON.stringify(data) })
 export const logWaste = (data: LogWasteInput) =>
   apiFetch<void>('/api/inventory/waste', { method: 'POST', body: JSON.stringify(data) })
 export const adjustStock = (data: AdjustStockInput) =>
   apiFetch<void>('/api/inventory/adjust', { method: 'POST', body: JSON.stringify(data) })
+export const adjustLotPrice = (data: AdjustLotPriceInput) =>
+  apiFetch<void>('/api/inventory/adjust-price', { method: 'POST', body: JSON.stringify(data) })
 export const updateInventoryItem = (id: string, data: Partial<CreateInventoryInput>) =>
   apiFetch<InventoryItem>(`/api/inventory/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deleteInventoryItem = (id: string) =>
@@ -82,8 +121,18 @@ export function useInventoryTransactions(itemId: string | undefined, params?: { 
     enabled: !!itemId,
   })
 }
+export function useProducible(itemId: string | undefined) {
+  return useQuery({
+    queryKey: ['inventory', itemId, 'producible'],
+    queryFn: () => getProducible(itemId!),
+    enabled: !!itemId,
+  })
+}
 export function useWasteLog() {
   return useQuery({ queryKey: ['inventory', 'waste-log'], queryFn: getWasteLog })
+}
+export function useIngredientUsage(date?: string) {
+  return useQuery({ queryKey: ['inventory', 'usage', date], queryFn: () => getIngredientUsage(date) })
 }
 export function useCreateInventoryItem() {
   const qc = useQueryClient()
@@ -114,6 +163,14 @@ export function useAdjustStock() {
   return useMutation({
     mutationFn: adjustStock,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['inventory'] }); toast.success('Stock adjusted') },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+export function useAdjustLotPrice() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: adjustLotPrice,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inventory'] }); toast.success('Unit cost corrected') },
     onError: (e: Error) => toast.error(e.message),
   })
 }

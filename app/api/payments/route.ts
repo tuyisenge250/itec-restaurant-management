@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { requireRole } from '@/lib/auth/session'
 import { createPaymentSchema } from '@/lib/validation/payment.schema'
 import { recordPayment } from '@/lib/services/payment.service'
@@ -7,13 +8,25 @@ import { handleApiError } from '@/lib/api-error'
 
 export async function GET(req: NextRequest) {
   try {
-    await requireRole('admin', 'waiter')
+    const user = await requireRole('admin', 'waiter')
     const orderId = req.nextUrl.searchParams.get('orderId') ?? undefined
 
+    // A waiter only ever sees payments on orders they created — same rule
+    // as the orders list itself, enforced here too since payments are
+    // fetchable independently by orderId.
+    const where: Prisma.PaymentWhereInput = { orderId }
+    if (user.role === 'waiter') {
+      where.order = { createdById: user.sub }
+    }
+
     const payments = await prisma.payment.findMany({
-      where: orderId ? { orderId } : undefined,
+      where,
       orderBy: { createdAt: 'desc' },
-      include: { refunds: true },
+      include: {
+        recordedBy: { select: { name: true } },
+        refunds: { include: { recordedBy: { select: { name: true } } } },
+        refundRequests: { orderBy: { createdAt: 'desc' }, include: { reviewedBy: { select: { name: true } } } },
+      },
       take: 100,
     })
     return NextResponse.json(payments)

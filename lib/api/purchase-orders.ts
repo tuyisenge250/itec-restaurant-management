@@ -24,8 +24,40 @@ export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>
 export type ReceivePurchaseOrderInput = z.infer<typeof receivePurchaseOrderSchema>
 export type UpdatePurchaseOrderStatusInput = z.infer<typeof updatePurchaseOrderStatusSchema>
 
+export type PurchaseOrderDetail = PurchaseOrder & {
+  notes: string | null
+  createdById: string
+  createdBy: { name: string }
+  approvedById: string | null
+  approvedBy: { name: string } | null
+  approvedAt: string | null
+  reorderedFromId: string | null
+  reorderedFrom: { id: string; createdAt: string } | null
+  goodsReceipts: {
+    id: string
+    receivedAt: string
+    notes: string | null
+    receivedBy: { name: string }
+    lines: {
+      id: string
+      quantityReceived: number
+      unitCost: number
+      costingMethod: 'fifo' | 'lifo'
+      purchaseOrderItem: { inventoryItem: { name: string; unit: string } }
+    }[]
+  }[]
+  auditLog: {
+    id: string
+    action: string
+    createdAt: string
+    user: { name: string } | null
+    beforeData: unknown
+    afterData: unknown
+  }[]
+}
+
 export const getPurchaseOrders = () => apiFetch<PurchaseOrder[]>('/api/purchase-orders')
-export const getPurchaseOrder = (id: string) => apiFetch<PurchaseOrder>(`/api/purchase-orders/${id}`)
+export const getPurchaseOrder = (id: string) => apiFetch<PurchaseOrderDetail>(`/api/purchase-orders/${id}`)
 export const createPurchaseOrder = (data: CreatePurchaseOrderInput) =>
   apiFetch<PurchaseOrder>('/api/purchase-orders', { method: 'POST', body: JSON.stringify(data) })
 export const receivePurchaseOrder = (id: string, data: ReceivePurchaseOrderInput) =>
@@ -37,6 +69,9 @@ export const reorderPurchaseOrder = (id: string) =>
 
 export function usePurchaseOrders() {
   return useQuery({ queryKey: ['purchase-orders'], queryFn: getPurchaseOrders })
+}
+export function usePurchaseOrder(id: string | undefined) {
+  return useQuery({ queryKey: ['purchase-orders', id], queryFn: () => getPurchaseOrder(id!), enabled: !!id })
 }
 export function useCreatePurchaseOrder() {
   const qc = useQueryClient()

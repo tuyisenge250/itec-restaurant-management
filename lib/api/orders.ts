@@ -11,19 +11,48 @@ import {
   applyDiscountSchema,
   voidOrderItemSchema,
 } from '@/lib/validation/order.schema'
+import type { RefundRequest } from '@/lib/api/payments'
 
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'paid' | 'cancelled'
 export type Order = {
   id: string; table: string; status: OrderStatus; createdById: string
+  createdBy: { name: string }
+  startedById: string | null; startedAt: string | null
+  startedBy: { name: string } | null
   discountPercent: number | null; discountAmount: number | null; discountReason: string | null
   createdAt: string; updatedAt: string
   items: {
     id: string; menuItemId: string; quantity: number; priceAtSale: number; costAtSale: number
     isVoided: boolean; voidReason: string | null
+    voidedById: string | null; voidedAt: string | null
     preparedById: string | null; preparedAt: string | null
+    preparedBy: { name: string } | null
+    voidedBy: { name: string } | null
     menuItem: { name: string }
   }[]
 }
+
+// The admin order-operations page needs more than the base Order shape:
+// full payment + refund history.
+export type OrderDetail = Order & {
+  payments: {
+    id: string; method: 'cash' | 'card' | 'momo' | 'other'
+    amount: number; discount: number; notes: string | null; createdAt: string
+    recordedBy: { name: string }
+    refunds: { id: string; amount: number; reason: string | null; createdAt: string; recordedBy: { name: string } }[]
+    refundRequests: RefundRequest[]
+  }[]
+}
+
+export type OrderAuditLogEntry = {
+  id: string; action: string; createdAt: string
+  user: { name: string } | null
+  beforeData: unknown; afterData: unknown
+}
+export type OrderAuditLog = { auditLog: OrderAuditLogEntry[]; stockReversedItemIds: string[] }
+
+export type OrderFilters = { status?: string; table?: string; waiterId?: string; from?: string; to?: string }
+
 export type CreateOrderInput = z.infer<typeof createOrderSchema>
 export type UpdateOrderItemsInput = z.infer<typeof updateOrderItemsSchema>
 export type OrderStatusTarget = z.infer<typeof updateOrderStatusSchema>['status']
@@ -32,14 +61,19 @@ export type MergeOrderInput = z.infer<typeof mergeOrderSchema>
 export type ApplyDiscountInput = z.infer<typeof applyDiscountSchema>
 export type VoidOrderItemInput = z.infer<typeof voidOrderItemSchema>
 
-export const getOrders = () => apiFetch<Order[]>('/api/orders')
-export const getOrder = (id: string) => apiFetch<Order>(`/api/orders/${id}`)
+export const getOrders = (filters?: OrderFilters) => {
+  const qs = new URLSearchParams(Object.entries(filters ?? {}).filter(([, v]) => !!v) as [string, string][]).toString()
+  return apiFetch<Order[]>(`/api/orders${qs ? `?${qs}` : ''}`)
+}
+export const getOrder = (id: string) => apiFetch<OrderDetail>(`/api/orders/${id}`)
+export const getOrderAuditLog = (id: string) => apiFetch<OrderAuditLog>(`/api/orders/${id}/audit-log`)
+export function useOrderAuditLog(id: string | undefined) {
+  return useQuery({ queryKey: ['orders', id, 'audit-log'], queryFn: () => getOrderAuditLog(id!), enabled: !!id })
+}
 export const createOrder = (data: CreateOrderInput) =>
   apiFetch<Order>('/api/orders', { method: 'POST', body: JSON.stringify(data) })
 export const updateOrderItems = (id: string, data: UpdateOrderItemsInput) =>
   apiFetch<Order>(`/api/orders/${id}/items`, { method: 'PATCH', body: JSON.stringify(data) })
-export const sendOrderToKitchen = (id: string) =>
-  apiFetch<Order>(`/api/orders/${id}/send-to-kitchen`, { method: 'POST' })
 export const updateOrderStatus = (id: string, status: OrderStatusTarget) =>
   apiFetch<Order>(`/api/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) })
 export const splitOrder = (id: string, data: SplitOrderInput) =>
@@ -70,11 +104,15 @@ export function useOrderCogs(id: string | undefined) {
   return useQuery({ queryKey: ['orders', id, 'cogs'], queryFn: () => getOrderCogs(id!), enabled: !!id })
 }
 
-export function useOrders(options?: { refetchInterval?: number }) {
-  return useQuery({ queryKey: ['orders'], queryFn: getOrders, refetchInterval: options?.refetchInterval })
+export function useOrders(options?: { refetchInterval?: number; filters?: OrderFilters }) {
+  return useQuery({
+    queryKey: ['orders', options?.filters],
+    queryFn: () => getOrders(options?.filters),
+    refetchInterval: options?.refetchInterval,
+  })
 }
-export function useOrder(id: string) {
-  return useQuery({ queryKey: ['orders', id], queryFn: () => getOrder(id) })
+export function useOrder(id: string | undefined) {
+  return useQuery({ queryKey: ['orders', id], queryFn: () => getOrder(id!), enabled: !!id })
 }
 export function useCreateOrder() {
   const qc = useQueryClient()
@@ -89,14 +127,6 @@ export function useUpdateOrderItems() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdateOrderItemsInput }) => updateOrderItems(id, data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['orders'] }); toast.success('Order updated') },
-    onError: (e: Error) => toast.error(e.message),
-  })
-}
-export function useSendOrderToKitchen() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: sendOrderToKitchen,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['orders'] }); toast.success('Sent to kitchen') },
     onError: (e: Error) => toast.error(e.message),
   })
 }

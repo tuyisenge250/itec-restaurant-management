@@ -16,3 +16,12 @@ export const adjustStockSchema = z.object({
   reasonCode: z.string().min(1),
   notes: z.string().optional(),
 })
+
+// Corrects a lot's unit cost (e.g. the receiving price was a data-entry
+// mistake) without moving any stock — a separate action from adjustStock.
+export const adjustLotPriceSchema = z.object({
+  lotId: z.string().min(1),
+  newUnitCost: z.number().positive(),
+  reasonCode: z.string().min(1),
+  notes: z.string().optional(),
+})

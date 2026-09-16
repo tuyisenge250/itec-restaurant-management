@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useForm, useFieldArray } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, ClipboardList, Trash2, Loader2, PackageCheck, RotateCcw } from 'lucide-react'
+import { Plus, ClipboardList, Trash2, Loader2, PackageCheck, RotateCcw, History } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
 import {
-  usePurchaseOrders, useCreatePurchaseOrder, useReceivePurchaseOrder,
+  usePurchaseOrders, usePurchaseOrder, useCreatePurchaseOrder, useReceivePurchaseOrder,
   useUpdatePurchaseOrderStatus, useReorderPurchaseOrder, type PurchaseOrder,
 } from '@/lib/api/purchase-orders'
 import { useSuppliers } from '@/lib/api/suppliers'
@@ -28,10 +28,123 @@ import type { z } from 'zod'
 type CreateFormValues = z.infer<typeof createPurchaseOrderSchema>
 type ReceiveLine = { quantity: number; costingMethod: 'fifo' | 'lifo' | '' }
 
+const ACTION_LABELS: Record<string, string> = {
+  'purchase_order.pending_approval': 'Submitted for approval',
+  'purchase_order.approved': 'Approved',
+  'purchase_order.cancelled': 'Cancelled',
+  'purchase_order.goods_received': 'Goods received',
+}
+
+function PurchaseOrderDetailDialog({ poId, onClose }: { poId: string | null; onClose: () => void }) {
+  const { data: po, isLoading } = usePurchaseOrder(poId ?? undefined)
+
+  return (
+    <Dialog open={!!poId} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Purchase order detail</DialogTitle></DialogHeader>
+        {isLoading || !po ? (
+          <Skeleton className="h-64 w-full" />
+        ) : (
+          <div className="flex flex-col gap-5">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div><span className="text-muted-foreground">Supplier</span><p className="font-medium">{po.supplier.name}</p></div>
+              <div><span className="text-muted-foreground">Status</span><p><StatusBadge status={po.status} /></p></div>
+              <div><span className="text-muted-foreground">Created by</span><p className="font-medium">{po.createdBy.name} · {new Date(po.createdAt).toLocaleString()}</p></div>
+              <div>
+                <span className="text-muted-foreground">Approved by</span>
+                <p className="font-medium">{po.approvedBy ? `${po.approvedBy.name} · ${new Date(po.approvedAt!).toLocaleString()}` : '—'}</p>
+              </div>
+              {po.reorderedFrom && (
+                <div className="col-span-2">
+                  <span className="text-muted-foreground">Reordered from</span>
+                  <p className="font-medium">PO #{po.reorderedFrom.id.slice(0, 8)} ({new Date(po.reorderedFrom.createdAt).toLocaleDateString()})</p>
+                </div>
+              )}
+              {po.notes && (
+                <div className="col-span-2"><span className="text-muted-foreground">Notes</span><p>{po.notes}</p></div>
+              )}
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-medium">Line items</p>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item</TableHead>
+                    <TableHead className="text-right">Ordered</TableHead>
+                    <TableHead className="text-right">Received</TableHead>
+                    <TableHead className="text-right">Unit cost</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {po.items.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>{item.inventoryItem.name}</TableCell>
+                      <TableCell className="text-right">{item.quantityOrdered} {item.inventoryItem.unit}</TableCell>
+                      <TableCell className="text-right">{item.quantityReceived} {item.inventoryItem.unit}</TableCell>
+                      <TableCell className="text-right">{rwf(item.unitCost)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            {po.goodsReceipts.length > 0 && (
+              <div>
+                <p className="mb-2 text-sm font-medium">Goods receipts</p>
+                <div className="flex flex-col gap-2">
+                  {po.goodsReceipts.map((gr) => (
+                    <div key={gr.id} className="rounded-md border border-border p-3 text-sm">
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Received by <span className="font-medium text-foreground">{gr.receivedBy.name}</span></span>
+                        <span>{new Date(gr.receivedAt).toLocaleString()}</span>
+                      </div>
+                      <ul className="mt-1 flex flex-col gap-0.5">
+                        {gr.lines.map((line) => (
+                          <li key={line.id} className="flex justify-between">
+                            <span>{line.purchaseOrderItem.inventoryItem.name} · {line.costingMethod.toUpperCase()}</span>
+                            <span>{line.quantityReceived} {line.purchaseOrderItem.inventoryItem.unit} @ {rwf(line.unitCost)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium"><History className="h-3.5 w-3.5" />History</p>
+              {po.auditLog.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No status changes recorded yet.</p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {po.auditLog.map((entry) => (
+                    <li key={entry.id} className="flex justify-between text-sm">
+                      <span>
+                        {ACTION_LABELS[entry.action] ?? entry.action} by <span className="font-medium">{entry.user?.name ?? 'Unknown'}</span>
+                      </span>
+                      <span className="text-muted-foreground">{new Date(entry.createdAt).toLocaleString()}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export default function PurchaseOrdersPage() {
   const [newOpen, setNewOpen] = useState(false)
   const [receivePO, setReceivePO] = useState<PurchaseOrder | null>(null)
   const [receiveLines, setReceiveLines] = useState<Record<string, ReceiveLine>>({})
+  const [detailId, setDetailId] = useState<string | null>(null)
 
   const { data: pos = [], isLoading } = usePurchaseOrders()
   const { data: suppliers = [] } = useSuppliers()
@@ -153,14 +266,14 @@ export default function PurchaseOrdersPage() {
                 {pos.map((po) => {
                   const totalCost = po.items.reduce((s, i) => s + i.quantityOrdered * i.unitCost, 0)
                   return (
-                    <TableRow key={po.id} className="hover:bg-accent">
+                    <TableRow key={po.id} className="hover:bg-accent cursor-pointer" onClick={() => setDetailId(po.id)}>
                       <TableCell className="font-medium">{po.supplier.name}</TableCell>
                       <TableCell><StatusBadge status={po.status} /></TableCell>
                       <TableCell>{po.items.length}</TableCell>
                       <TableCell>{rwf(totalCost)}</TableCell>
                       <TableCell className="text-muted-foreground">{new Date(po.createdAt).toLocaleDateString()}</TableCell>
                       <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">{statusActions(po)}</div>
+                        <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>{statusActions(po)}</div>
                       </TableCell>
                     </TableRow>
                   )
@@ -291,6 +404,8 @@ export default function PurchaseOrdersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PurchaseOrderDetailDialog poId={detailId} onClose={() => setDetailId(null)} />
     </div>
   )
 }

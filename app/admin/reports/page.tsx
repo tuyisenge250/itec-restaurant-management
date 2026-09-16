@@ -40,7 +40,7 @@ export default function ReportsPage() {
       <PageHeader title="Reports" description="Profit & loss summary" />
 
       <Card>
-        <CardContent className="flex flex-wrap items-end gap-4 p-4">
+        <CardContent className="flex flex-row flex-wrap items-end gap-4 p-4">
           <DateRangePicker value={range} onChange={setRange} />
           <Button onClick={handleApply}>Apply</Button>
         </CardContent>

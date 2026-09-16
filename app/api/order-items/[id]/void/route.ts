@@ -6,11 +6,11 @@ import { handleApiError } from '@/lib/api-error'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await requireRole('kitchen')
+    const user = await requireRole('kitchen', 'admin')
     const { id } = await params
     const { voidReason } = voidOrderItemSchema.parse(await req.json())
 
-    const item = await voidOrderItem({ orderItemId: id, voidReason, userId: user.sub })
+    const item = await voidOrderItem({ orderItemId: id, voidReason, userId: user.sub, role: user.role })
     return NextResponse.json(item)
   } catch (err) {
     return handleApiError(err)

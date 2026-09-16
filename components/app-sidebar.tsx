@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import Image from 'next/image'
-import { LogOut } from 'lucide-react'
+import { LogOut, LayoutDashboard, ChefHat, Receipt } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -19,6 +19,16 @@ import {
 } from '@/components/ui/sidebar'
 import { navByRole, type Role } from '@/lib/nav-config'
 import { useCurrentUser } from '@/lib/api/auth'
+import { cn } from '@/lib/utils'
+
+// Admin accounts can also work as kitchen or waiter (the backend already
+// grants admin every kitchen/waiter permission) — this lets them jump
+// between the three areas without logging out.
+const ACCOUNT_VIEWS: { role: Role; label: string; href: string; icon: typeof LayoutDashboard }[] = [
+  { role: 'admin', label: 'Admin', href: '/admin', icon: LayoutDashboard },
+  { role: 'kitchen', label: 'Kitchen', href: '/kitchen/orders', icon: ChefHat },
+  { role: 'waiter', label: 'Waiter', href: '/waiter/orders/new', icon: Receipt },
+]
 
 export function AppSidebar({ role }: { role: Role }) {
   const pathname = usePathname()
@@ -49,6 +59,31 @@ export function AppSidebar({ role }: { role: Role }) {
       </SidebarHeader>
 
       <SidebarContent>
+        {user?.role === 'admin' && (
+          <div className="px-3 pt-3">
+            <div className="flex gap-1 rounded-md border border-sidebar-border bg-primary-foreground/10 p-1">
+              {ACCOUNT_VIEWS.map((view) => {
+                const isActiveView = role === view.role
+                return (
+                  <Link
+                    key={view.role}
+                    href={view.href}
+                    className={cn(
+                      'flex flex-1 items-center justify-center gap-1.5 rounded-sm px-2 py-1.5 text-xs font-medium transition-colors',
+                      isActiveView
+                        ? 'bg-sidebar-primary text-sidebar-primary-foreground shadow-sm'
+                        : 'text-primary-foreground/70 hover:bg-primary-foreground/10 hover:text-primary-foreground'
+                    )}
+                  >
+                    <view.icon className="h-3.5 w-3.5" />
+                    {view.label}
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         <SidebarGroup>
           <SidebarGroupLabel className="text-lg font-bold capitalize text-white">{role} menu</SidebarGroupLabel>
           <SidebarGroupContent>

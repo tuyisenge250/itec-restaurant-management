@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, CreditCard, Send, Plus, X, Split, Merge, Percent, Loader2 } from 'lucide-react'
+import { ArrowLeft, CreditCard, Plus, Minus, X, Split, Merge, Percent } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { Button } from '@/components/ui/button'
@@ -15,30 +15,39 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import {
-  useOrder, useOrders, useUpdateOrderItems, useSendOrderToKitchen,
+  useOrder, useOrders, useOrderAuditLog, useUpdateOrderItems,
   useSplitOrder, useMergeOrder, useApplyOrderDiscount,
 } from '@/lib/api/orders'
 import { useMenu } from '@/lib/api/menu'
 import { useCurrentUser } from '@/lib/api/auth'
 import { DISCOUNT_CAPS } from '@/lib/rbac'
+import { computeKitchenInfo, formatDuration } from '@/lib/kitchen-timing'
 import { rwf } from '@/lib/utils'
+
+// There's no per-item status field — this derives pending/preparing/ready
+// from the order's own status plus whether this item's stock has actually
+// been drawn (preparedAt is set exactly at the order's ready transition).
+function itemKitchenStatus(orderStatus: string, item: { preparedAt: string | null }): 'pending' | 'preparing' | 'ready' {
+  if (orderStatus === 'pending') return 'pending'
+  return item.preparedAt ? 'ready' : 'preparing'
+}
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: order, isLoading } = useOrder(id)
+  const { data: auditData } = useOrderAuditLog(id)
   const { data: menuItems = [] } = useMenu()
   const { data: allOrders = [] } = useOrders()
   const { data: me } = useCurrentUser()
 
   const updateItems = useUpdateOrderItems()
-  const sendToKitchen = useSendOrderToKitchen()
   const splitOrder = useSplitOrder()
   const mergeOrder = useMergeOrder()
   const applyDiscount = useApplyOrderDiscount()
 
   const [addMenuItemId, setAddMenuItemId] = useState('')
   const [splitOpen, setSplitOpen] = useState(false)
-  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
+  const [splitQuantities, setSplitQuantities] = useState<Record<string, number>>({})
   const [mergeOpen, setMergeOpen] = useState(false)
   const [targetOrderId, setTargetOrderId] = useState('')
   const [discountOpen, setDiscountOpen] = useState(false)
@@ -58,21 +67,20 @@ export default function OrderDetailPage() {
   const total = activeItems.reduce((s, i) => s + i.priceAtSale * i.quantity, 0)
   const isPending = order.status === 'pending'
   const cap = me ? DISCOUNT_CAPS[me.role] : 0
+  const { preparedByNames, sentToKitchenAt, kitchenDurationMs, inProgressMs } = computeKitchenInfo(order, auditData?.auditLog)
 
   const eligibleMergeTargets = allOrders.filter(
     (o) => o.id !== order.id && o.table === order.table && !['paid', 'cancelled'].includes(o.status)
   )
 
-  function toggleSelected(itemId: string) {
-    setSelectedItemIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(itemId)) next.delete(itemId)
-      else next.add(itemId)
-      return next
-    })
+  function setSplitQty(itemId: string, qty: number, max: number) {
+    const clamped = Math.max(0, Math.min(Math.floor(qty) || 0, max))
+    setSplitQuantities((prev) => ({ ...prev, [itemId]: clamped }))
   }
 
-  const selectedTotal = activeItems.filter((i) => selectedItemIds.has(i.id)).reduce((s, i) => s + i.priceAtSale * i.quantity, 0)
+  const totalActiveQty = activeItems.reduce((s, i) => s + i.quantity, 0)
+  const selectedQty = activeItems.reduce((s, i) => s + (splitQuantities[i.id] ?? 0), 0)
+  const selectedTotal = activeItems.reduce((s, i) => s + (splitQuantities[i.id] ?? 0) * i.priceAtSale, 0)
   const remainingTotal = total - selectedTotal
 
   async function handleAddItem() {
@@ -86,11 +94,27 @@ export default function OrderDetailPage() {
     await updateItems.mutateAsync({ id: order.id, data: { add: [], removeItemIds: [orderItemId] } })
   }
 
+  // The API only ever takes add/remove, not an in-place quantity update —
+  // while pending, nothing's been prepared yet, so swapping the row for one
+  // with the new quantity is equivalent and needs no new endpoint.
+  async function handleChangeQty(item: { id: string; menuItemId: string; quantity: number }, delta: number) {
+    if (!order) return
+    const newQty = item.quantity + delta
+    if (newQty <= 0) { await handleRemoveItem(item.id); return }
+    await updateItems.mutateAsync({
+      id: order.id,
+      data: { add: [{ menuItemId: item.menuItemId, quantity: newQty }], removeItemIds: [item.id] },
+    })
+  }
+
   async function handleSplit() {
     if (!order) return
-    await splitOrder.mutateAsync({ id: order.id, data: { itemIds: Array.from(selectedItemIds) } })
+    const items = activeItems
+      .map((i) => ({ orderItemId: i.id, quantity: splitQuantities[i.id] ?? 0 }))
+      .filter((i) => i.quantity > 0)
+    await splitOrder.mutateAsync({ id: order.id, data: { items } })
     setSplitOpen(false)
-    setSelectedItemIds(new Set())
+    setSplitQuantities({})
   }
 
   async function handleMerge() {
@@ -125,16 +149,48 @@ export default function OrderDetailPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-2 pb-4">
           {order.items.map((item) => (
-            <div key={item.id} className={`flex items-center justify-between text-sm ${item.isVoided ? 'text-muted-foreground line-through' : ''}`}>
-              <span>{item.menuItem.name} <span className="text-muted-foreground">×{item.quantity}</span></span>
-              <div className="flex items-center gap-2">
-                <span>{rwf(item.priceAtSale * item.quantity)}</span>
-                {isPending && !item.isVoided && (
-                  <button onClick={() => handleRemoveItem(item.id)} className="text-muted-foreground hover:text-destructive">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
+            <div key={item.id} className="flex flex-col gap-1">
+              <div className={`flex items-center justify-between text-sm ${item.isVoided ? 'text-muted-foreground line-through' : ''}`}>
+                <span className="flex items-center gap-2">
+                  {item.menuItem.name}
+                  {isPending ? (
+                    <span className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleChangeQty(item, -1)}
+                        disabled={updateItems.isPending}
+                        className="flex h-5 w-5 items-center justify-center rounded border border-border hover:bg-accent"
+                      >
+                        <Minus className="h-3 w-3" />
+                      </button>
+                      <span className="w-4 text-center text-muted-foreground">{item.quantity}</span>
+                      <button
+                        onClick={() => handleChangeQty(item, 1)}
+                        disabled={updateItems.isPending}
+                        className="flex h-5 w-5 items-center justify-center rounded border border-border hover:bg-accent"
+                      >
+                        <Plus className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">×{item.quantity}</span>
+                  )}
+                  {!item.isVoided && <StatusBadge status={itemKitchenStatus(order.status, item)} />}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span>{rwf(item.priceAtSale * item.quantity)}</span>
+                  {isPending && !item.isVoided && (
+                    <button onClick={() => handleRemoveItem(item.id)} className="text-muted-foreground hover:text-destructive">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
+              {item.isVoided && (
+                <p className="text-xs text-destructive">
+                  Voided by kitchen{item.voidReason ? ` — ${item.voidReason}` : ''}
+                  {item.voidedAt ? ` · ${new Date(item.voidedAt).toLocaleString()}` : ''}
+                </p>
+              )}
             </div>
           ))}
 
@@ -154,7 +210,7 @@ export default function OrderDetailPage() {
             </div>
           ) : (
             <p className="mt-1 text-xs text-muted-foreground">
-              Sent to kitchen — ask kitchen to void an item if it needs to change.
+              Kitchen has started this order — ask kitchen to void an item if it needs to change.
             </p>
           )}
 
@@ -172,13 +228,39 @@ export default function OrderDetailPage() {
         </CardContent>
       </Card>
 
+      {!isPending && order.status !== 'paid' && order.status !== 'cancelled' && (
+        <Card>
+          <CardHeader className="pb-3"><CardTitle className="text-base">Kitchen</CardTitle></CardHeader>
+          <CardContent className="flex flex-col gap-1.5 pb-4 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Started by kitchen</span>
+              <span>{sentToKitchenAt ? new Date(sentToKitchenAt).toLocaleString() : '—'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Working on it</span>
+              <span>{preparedByNames.length ? preparedByNames.join(', ') : 'Not yet picked up'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">{kitchenDurationMs != null ? 'Time taken' : 'Time so far'}</span>
+              <span>
+                {kitchenDurationMs != null
+                  ? formatDuration(kitchenDurationMs)
+                  : inProgressMs != null
+                    ? formatDuration(inProgressMs)
+                    : '—'}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {isPending && (
+        <p className="rounded-md border border-dashed border-border p-3 text-center text-sm text-muted-foreground">
+          Waiting for kitchen to start this order — you can keep editing it until then.
+        </p>
+      )}
+
       <div className="grid grid-cols-2 gap-2">
-        {isPending && (
-          <Button className="col-span-2" disabled={activeItems.length === 0 || sendToKitchen.isPending} onClick={() => sendToKitchen.mutate(order.id)}>
-            {sendToKitchen.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-            Send to kitchen
-          </Button>
-        )}
         {!['paid', 'cancelled'].includes(order.status) && (
           <>
             <Button variant="outline" onClick={() => setSplitOpen(true)}><Split className="mr-2 h-4 w-4" />Split</Button>
@@ -196,28 +278,47 @@ export default function OrderDetailPage() {
       </div>
 
       {/* Split dialog */}
-      <Dialog open={splitOpen} onOpenChange={setSplitOpen}>
+      <Dialog open={splitOpen} onOpenChange={(o) => { setSplitOpen(o); if (!o) setSplitQuantities({}) }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Split order</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Select the items to move to a new order.</p>
+          <p className="text-sm text-muted-foreground">
+            Choose how many of each item move to a new order — a line ordered ×3 can send just 1.
+          </p>
           <div className="flex flex-col gap-2">
             {activeItems.map((item) => (
-              <label key={item.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-                <span className="flex items-center gap-2">
-                  <input type="checkbox" checked={selectedItemIds.has(item.id)} onChange={() => toggleSelected(item.id)} />
-                  {item.menuItem.name} ×{item.quantity}
-                </span>
-                <span>{rwf(item.priceAtSale * item.quantity)}</span>
-              </label>
+              <div key={item.id} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm">
+                <span>{item.menuItem.name} <span className="text-muted-foreground">(of {item.quantity})</span></span>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={item.quantity}
+                    className="w-16"
+                    value={splitQuantities[item.id] ?? 0}
+                    onChange={(e) => setSplitQty(item.id, parseInt(e.target.value, 10), item.quantity)}
+                  />
+                  <span className="w-20 text-right text-muted-foreground">
+                    {rwf((splitQuantities[item.id] ?? 0) * item.priceAtSale)}
+                  </span>
+                </div>
+              </div>
             ))}
           </div>
           <div className="flex justify-between text-sm">
             <span>New order: {rwf(selectedTotal)}</span>
             <span>Remaining here: {rwf(remainingTotal)}</span>
           </div>
+          {selectedQty > 0 && selectedQty >= totalActiveQty && (
+            <p className="text-xs text-destructive">Can&apos;t move everything — at least one item must remain on this order.</p>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setSplitOpen(false)}>Cancel</Button>
-            <Button disabled={selectedItemIds.size === 0 || splitOrder.isPending} onClick={handleSplit}>Split</Button>
+            <Button
+              disabled={selectedQty === 0 || selectedQty >= totalActiveQty || splitOrder.isPending}
+              onClick={handleSplit}
+            >
+              Split
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -17,11 +17,6 @@ export const updateSupplierSchema = z.object({
   isActive: z.boolean().optional(),
 })
 
-export const createSupplierNoteSchema = z.object({
-  type: z.enum(['late_delivery', 'quality_issue', 'general']).default('general'),
-  note: z.string().min(1),
-})
-
 export const createPurchaseOrderSchema = z.object({
   supplierId: z.string().min(1),
   notes: z.string().optional(),

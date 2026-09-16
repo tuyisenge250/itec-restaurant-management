@@ -25,8 +25,17 @@ export const updateOrderStatusSchema = z.object({
   status: z.enum(['preparing', 'ready', 'served', 'cancelled']),
 })
 
+// Splits by QUANTITY per line, not whole rows — a line ordered ×3 can send
+// 1 to the new order and keep 2 on this one.
 export const splitOrderSchema = z.object({
-  itemIds: z.array(z.string().min(1)).min(1),
+  items: z
+    .array(
+      z.object({
+        orderItemId: z.string().min(1),
+        quantity: z.number().int().positive(),
+      })
+    )
+    .min(1),
 })
 
 export const mergeOrderSchema = z.object({

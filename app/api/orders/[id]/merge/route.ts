@@ -10,7 +10,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params
     const { targetOrderId } = mergeOrderSchema.parse(await req.json())
 
-    const order = await mergeOrders({ sourceOrderId: id, targetOrderId, userId: user.sub })
+    const order = await mergeOrders({ sourceOrderId: id, targetOrderId, userId: user.sub, role: user.role })
     return NextResponse.json(order)
   } catch (err) {
     return handleApiError(err)

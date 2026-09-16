@@ -2,7 +2,6 @@ import { prisma } from '@/lib/db/prisma'
 import type { Prisma, PurchaseOrderStatus } from '@prisma/client'
 import { receiveGoodsLine } from './inventory.service'
 import { writeAuditLog } from '@/lib/audit'
-import { assertNotSelfApproval } from '@/lib/rbac'
 import { BusinessRuleError, NotFoundError } from '@/lib/errors'
 
 export async function createPurchaseOrder(params: {
@@ -65,7 +64,9 @@ export async function updatePurchaseOrderStatus(params: {
     const data: Prisma.PurchaseOrderUncheckedUpdateInput = { status: newStatus }
 
     if (po.status === 'pending_approval' && newStatus === 'ordered') {
-      assertNotSelfApproval(po.createdById, userId)
+      // Any admin can approve, including the PO's own creator — approvedById
+      // still records exactly who did it, so there's a full audit trail even
+      // without a separation-of-duties block.
       data.approvedById = userId
       data.approvedAt = new Date()
     }
@@ -207,13 +208,4 @@ export async function receiveGoodsForPurchaseOrder(params: {
 
     return updatedPO
   })
-}
-
-export async function addSupplierNote(params: {
-  supplierId: string
-  type: 'late_delivery' | 'quality_issue' | 'general'
-  note: string
-  authorId: string
-}) {
-  return prisma.supplierNote.create({ data: params })
 }

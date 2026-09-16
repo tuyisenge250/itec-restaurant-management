@@ -12,6 +12,7 @@ import {
   Receipt,
   CreditCard,
   Trash2,
+  ListOrdered,
 } from 'lucide-react'
 
 export type Role = 'admin' | 'kitchen' | 'waiter'
@@ -25,6 +26,7 @@ export type NavItem = {
 export const navByRole: Record<Role, NavItem[]> = {
   admin: [
     { title: 'Dashboard', url: '/admin', icon: LayoutDashboard },
+    { title: 'Orders', url: '/admin/orders', icon: ListOrdered },
     { title: 'Suppliers', url: '/admin/suppliers', icon: Truck },
     { title: 'Purchase orders', url: '/admin/purchase-orders', icon: ClipboardList },
     { title: 'Inventory', url: '/admin/inventory', icon: Boxes },

@@ -3,6 +3,9 @@ import { requireRole } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 
+// Full detail view for one PO: who created/approved it, every goods receipt
+// (and who received it), and the complete status-change audit trail — the
+// "click a row, see everything, including who moved it" view.
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -10,15 +13,37 @@ export async function GET(
   try {
     await requireRole('admin')
     const { id } = await params
-    const po = await prisma.purchaseOrder.findUniqueOrThrow({
-      where: { id },
-      include: {
-        supplier: { select: { name: true } },
-        items: { include: { inventoryItem: { select: { name: true, unit: true } } } },
-        createdBy: { select: { name: true } },
-      },
-    })
-    return NextResponse.json(po)
+
+    const [po, auditLog] = await Promise.all([
+      prisma.purchaseOrder.findUniqueOrThrow({
+        where: { id },
+        include: {
+          supplier: { select: { name: true, phone: true, email: true } },
+          items: { include: { inventoryItem: { select: { name: true, unit: true } } } },
+          createdBy: { select: { name: true } },
+          approvedBy: { select: { name: true } },
+          reorderedFrom: { select: { id: true, createdAt: true } },
+          goodsReceipts: {
+            orderBy: { receivedAt: 'desc' },
+            include: {
+              receivedBy: { select: { name: true } },
+              lines: {
+                include: {
+                  purchaseOrderItem: { include: { inventoryItem: { select: { name: true, unit: true } } } },
+                },
+              },
+            },
+          },
+        },
+      }),
+      prisma.auditLog.findMany({
+        where: { entityType: 'PurchaseOrder', entityId: id },
+        orderBy: { createdAt: 'asc' },
+        include: { user: { select: { name: true } } },
+      }),
+    ])
+
+    return NextResponse.json({ ...po, auditLog })
   } catch (err) {
     return handleApiError(err)
   }

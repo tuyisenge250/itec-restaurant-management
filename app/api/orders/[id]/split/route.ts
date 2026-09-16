@@ -8,9 +8,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const user = await requireRole('waiter', 'admin')
     const { id } = await params
-    const { itemIds } = splitOrderSchema.parse(await req.json())
+    const { items } = splitOrderSchema.parse(await req.json())
 
-    const newOrder = await splitOrder({ orderId: id, itemIds, userId: user.sub })
+    const newOrder = await splitOrder({ orderId: id, items, userId: user.sub, role: user.role })
     return NextResponse.json(newOrder, { status: 201 })
   } catch (err) {
     return handleApiError(err)

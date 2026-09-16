@@ -11,8 +11,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useMenu } from '@/lib/api/menu'
 import { useCreateOrder } from '@/lib/api/orders'
+import { useTables } from '@/lib/api/tables'
 import { rwf } from '@/lib/utils'
 
 type OrderLine = { id: string; name: string; price: number; qty: number }
@@ -20,11 +22,15 @@ type OrderLine = { id: string; name: string; price: number; qty: number }
 export default function NewOrderPage() {
   const router = useRouter()
   const { data: menuItems = [], isLoading } = useMenu()
+  const { data: knownTables = [] } = useTables()
   const createOrder = useCreateOrder()
 
   const [lines, setLines] = useState<OrderLine[]>([])
   const [table, setTable] = useState('')
+  const [addingNewTable, setAddingNewTable] = useState(false)
   const [error, setError] = useState('')
+
+  const NEW_TABLE_OPTION = '__new__'
 
   function addItem(item: { id: string; name: string; price: number }) {
     setError('')
@@ -125,7 +131,39 @@ export default function NewOrderPage() {
         <h2 className="font-semibold text-foreground">Order summary</h2>
         <div className="flex flex-col gap-1.5">
           <Label>Table</Label>
-          <Input placeholder="T1" value={table} onChange={(e) => setTable(e.target.value)} />
+          {knownTables.length > 0 && !addingNewTable ? (
+            <Select
+              value={table || null}
+              onValueChange={(v) => {
+                if (v === NEW_TABLE_OPTION) { setAddingNewTable(true); setTable('') }
+                else setTable(v ?? '')
+              }}
+            >
+              <SelectTrigger className="w-full"><SelectValue placeholder="Choose a table" /></SelectTrigger>
+              <SelectContent>
+                {knownTables.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                <SelectItem value={NEW_TABLE_OPTION}>+ Add new table…</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <Input
+                placeholder="e.g. T15"
+                value={table}
+                onChange={(e) => setTable(e.target.value)}
+                autoFocus={addingNewTable}
+              />
+              {knownTables.length > 0 && (
+                <button
+                  type="button"
+                  className="w-fit text-xs text-primary hover:underline"
+                  onClick={() => { setAddingNewTable(false); setTable('') }}
+                >
+                  Choose from existing tables instead
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <Separator />
         {lines.length === 0 ? (

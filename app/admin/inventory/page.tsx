@@ -4,7 +4,7 @@ import { Fragment, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Boxes, Loader2, Plus, Pencil, Trash2, ChevronDown, ChevronRight, History, SlidersHorizontal } from 'lucide-react'
+import { Boxes, Loader2, Plus, Pencil, Trash2, ChevronDown, ChevronRight, History, SlidersHorizontal, ChefHat } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -23,7 +23,8 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import {
   useInventory, useCreateInventoryItem, useUpdateInventoryItem, useDeleteInventoryItem,
-  useInventoryLots, useInventoryTransactions, useAdjustStock, type InventoryItem,
+  useInventoryLots, useInventoryTransactions, useAdjustStock, useAdjustLotPrice, useProducible,
+  type InventoryItem, type InventoryTransaction,
 } from '@/lib/api/inventory'
 import { rwf } from '@/lib/utils'
 
@@ -41,19 +42,130 @@ const REASON_CODES = [
   { value: 'other', label: 'Other' },
 ]
 
+function TransactionDetail({ tx }: { tx: InventoryTransaction }) {
+  const ref = tx.reference
+  if (ref?.kind === 'order') {
+    return (
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm sm:grid-cols-3">
+        <div><span className="text-muted-foreground">Table</span><div className="font-medium">{ref.table}</div></div>
+        <div><span className="text-muted-foreground">Order status</span><div><StatusBadge status={ref.orderStatus} /></div></div>
+        <div><span className="text-muted-foreground">Order placed</span><div className="font-medium">{new Date(ref.orderCreatedAt).toLocaleString()}</div></div>
+        <div><span className="text-muted-foreground">Waiter</span><div className="font-medium">{ref.waiterName}</div></div>
+        <div><span className="text-muted-foreground">Menu item</span><div className="font-medium">{ref.menuItemName} × {ref.quantitySold}</div></div>
+        <div><span className="text-muted-foreground">Price / cost at sale</span><div className="font-medium">{rwf(ref.priceAtSale)} / {rwf(ref.costAtSale)}</div></div>
+        <div><span className="text-muted-foreground">Prepared by</span><div className="font-medium">{ref.preparedByName ?? '—'}{ref.preparedAt ? ` · ${new Date(ref.preparedAt).toLocaleString()}` : ''}</div></div>
+        {ref.isVoided && (
+          <div className="col-span-2"><span className="text-muted-foreground">Voided</span><div className="font-medium text-destructive">{ref.voidReason ?? 'No reason given'}</div></div>
+        )}
+      </div>
+    )
+  }
+  if (ref?.kind === 'purchase_order') {
+    return (
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm sm:grid-cols-3">
+        <div><span className="text-muted-foreground">Supplier</span><div className="font-medium">{ref.supplierName}</div></div>
+        <div><span className="text-muted-foreground">PO status</span><div><StatusBadge status={ref.status} /></div></div>
+      </div>
+    )
+  }
+  if (ref?.kind === 'prep_recipe') {
+    return (
+      <div className="text-sm">
+        <span className="text-muted-foreground">Produced for</span>{' '}
+        <span className="font-medium">{ref.outputItemName}</span>
+      </div>
+    )
+  }
+  return (
+    <p className="text-sm text-muted-foreground">
+      {tx.notes ? tx.notes : 'No additional detail for this transaction.'}
+    </p>
+  )
+}
+
+function ProducibleSection({ itemId }: { itemId: string }) {
+  const { data, isLoading } = useProducible(itemId)
+
+  if (isLoading) return <Skeleton className="h-12 w-full" />
+  if (!data || (data.menuItems.length === 0 && data.prepRecipes.length === 0)) {
+    return <p className="text-sm text-muted-foreground">This item isn&apos;t used in any recipe yet.</p>
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {data.menuItems.length > 0 && (
+        <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">Menu items</p>
+          <ul className="flex flex-col gap-1">
+            {data.menuItems.map((mi) => (
+              <li key={mi.menuItemId} className="flex items-center justify-between text-sm">
+                <span>{mi.menuItemName}</span>
+                <span className="font-medium">
+                  {mi.maxUnits} {mi.maxUnits === 1 ? 'unit' : 'units'}
+                  {mi.limitingIngredient && (
+                    <span className="ml-1.5 font-normal text-muted-foreground">limited by {mi.limitingIngredient.name}</span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {data.prepRecipes.length > 0 && (
+        <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">Prep / mixture recipes</p>
+          <ul className="flex flex-col gap-1">
+            {data.prepRecipes.map((pr) => (
+              <li key={pr.prepRecipeId} className="flex items-center justify-between text-sm">
+                <span>{pr.outputItemName}</span>
+                <span className="font-medium">
+                  {pr.maxBatches} {pr.maxBatches === 1 ? 'batch' : 'batches'}
+                  <span className="font-normal text-muted-foreground"> (~{pr.estimatedOutputQuantity.toFixed(2)} {pr.outputUnit})</span>
+                  {pr.limitingIngredient && (
+                    <span className="ml-1.5 font-normal text-muted-foreground">limited by {pr.limitingIngredient.name}</span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function LotsPanel({ item }: { item: InventoryItem }) {
   const { data: lots = [], isLoading } = useInventoryLots(item.id)
   const [ledgerOpen, setLedgerOpen] = useState(false)
+  const [expandedTxId, setExpandedTxId] = useState<string | null>(null)
   const [adjustLotId, setAdjustLotId] = useState('')
   const [adjustQty, setAdjustQty] = useState('')
   const [reasonCode, setReasonCode] = useState('')
   const [notes, setNotes] = useState('')
+  const [priceLotId, setPriceLotId] = useState('')
+  const [newUnitCost, setNewUnitCost] = useState('')
+  const [priceReasonCode, setPriceReasonCode] = useState('')
+  const [priceNotes, setPriceNotes] = useState('')
   const adjustStock = useAdjustStock()
+  const adjustLotPrice = useAdjustLotPrice()
   const { data: transactions = [], isLoading: txLoading } = useInventoryTransactions(ledgerOpen ? item.id : undefined)
 
   async function submitAdjustment() {
     await adjustStock.mutateAsync({ lotId: adjustLotId, quantity: parseFloat(adjustQty), reasonCode, notes: notes || undefined })
     setAdjustLotId(''); setAdjustQty(''); setReasonCode(''); setNotes('')
+  }
+
+  async function submitPriceAdjustment() {
+    await adjustLotPrice.mutateAsync({ lotId: priceLotId, newUnitCost: parseFloat(newUnitCost), reasonCode: priceReasonCode, notes: priceNotes || undefined })
+    setPriceLotId(''); setNewUnitCost(''); setPriceReasonCode(''); setPriceNotes('')
+  }
+
+  // "Zero out" fills in the negative delta needed to bring this lot's
+  // remaining quantity to exactly zero — the adjustment API takes a signed
+  // delta, not an absolute target, so typing 0 there is rejected as a no-op.
+  function zeroOutLot(lot: (typeof lots)[number]) {
+    setAdjustLotId(lot.id)
+    setAdjustQty((-lot.quantityRemaining).toFixed(2))
   }
 
   return (
@@ -78,6 +190,7 @@ function LotsPanel({ item }: { item: InventoryItem }) {
                     <TableHead className="text-right">Unit cost</TableHead>
                     <TableHead>Supplier</TableHead>
                     <TableHead>Received</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -88,11 +201,26 @@ function LotsPanel({ item }: { item: InventoryItem }) {
                       <TableCell className="text-right">{rwf(lot.unitCost)}</TableCell>
                       <TableCell className="text-muted-foreground">{lot.supplier?.name ?? '—'}</TableCell>
                       <TableCell className="text-muted-foreground">{new Date(lot.receivedAt).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={lot.quantityRemaining <= 0}
+                          onClick={() => zeroOutLot(lot)}
+                        >
+                          Zero out
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             )}
+
+            <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
+              <span className="flex items-center gap-1.5 text-sm font-medium"><ChefHat className="h-3.5 w-3.5" />Producible from current stock</span>
+              <ProducibleSection itemId={item.id} />
+            </div>
 
             <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
               <span className="flex items-center gap-1.5 text-sm font-medium"><SlidersHorizontal className="h-3.5 w-3.5" />Manual adjustment</span>
@@ -122,11 +250,40 @@ function LotsPanel({ item }: { item: InventoryItem }) {
               </div>
               <Input placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
             </div>
+
+            <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
+              <span className="flex items-center gap-1.5 text-sm font-medium"><SlidersHorizontal className="h-3.5 w-3.5" />Price correction</span>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Select value={priceLotId || null} onValueChange={(v) => setPriceLotId(v ?? '')}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Lot" /></SelectTrigger>
+                  <SelectContent>
+                    {lots.map((lot) => (
+                      <SelectItem key={lot.id} value={lot.id}>{lot.costingMethod.toUpperCase()} · {rwf(lot.unitCost)}/unit</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input type="number" placeholder="New unit cost" value={newUnitCost} onChange={(e) => setNewUnitCost(e.target.value)} />
+                <Select value={priceReasonCode || null} onValueChange={(v) => setPriceReasonCode(v ?? '')}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Reason code" /></SelectTrigger>
+                  <SelectContent>
+                    {REASON_CODES.map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Button
+                  disabled={!priceLotId || !newUnitCost || !priceReasonCode || adjustLotPrice.isPending}
+                  onClick={submitPriceAdjustment}
+                >
+                  {adjustLotPrice.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Apply
+                </Button>
+              </div>
+              <Input placeholder="Notes (optional)" value={priceNotes} onChange={(e) => setPriceNotes(e.target.value)} />
+            </div>
           </div>
         )}
 
         <Dialog open={ledgerOpen} onOpenChange={setLedgerOpen}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogContent className="max-h-[85vh] w-full max-w-[95vw] overflow-y-auto sm:max-w-[67vw]">
             <DialogHeader><DialogTitle>Transaction ledger — {item.name}</DialogTitle></DialogHeader>
             {txLoading ? (
               <Skeleton className="h-40 w-full" />
@@ -136,6 +293,7 @@ function LotsPanel({ item }: { item: InventoryItem }) {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead />
                     <TableHead>Type</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
                     <TableHead className="text-right">Unit cost</TableHead>
@@ -144,15 +302,28 @@ function LotsPanel({ item }: { item: InventoryItem }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {transactions.map((t) => (
-                    <TableRow key={t.id}>
-                      <TableCell className="capitalize">{t.type}{t.reasonCode ? ` (${t.reasonCode})` : ''}</TableCell>
-                      <TableCell className="text-right">{t.quantity > 0 ? '+' : ''}{t.quantity.toFixed(2)}</TableCell>
-                      <TableCell className="text-right">{rwf(t.unitCost)}</TableCell>
-                      <TableCell className="text-muted-foreground">{t.recordedBy.name}</TableCell>
-                      <TableCell className="text-muted-foreground">{new Date(t.createdAt).toLocaleString()}</TableCell>
-                    </TableRow>
-                  ))}
+                  {transactions.map((t) => {
+                    const isTxOpen = expandedTxId === t.id
+                    return (
+                      <Fragment key={t.id}>
+                        <TableRow className="cursor-pointer hover:bg-accent" onClick={() => setExpandedTxId(isTxOpen ? null : t.id)}>
+                          <TableCell className="w-6">{isTxOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</TableCell>
+                          <TableCell className="capitalize">{t.type}{t.reasonCode ? ` (${t.reasonCode})` : ''}</TableCell>
+                          <TableCell className="text-right">{t.quantity > 0 ? '+' : ''}{t.quantity.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{rwf(t.unitCost)}</TableCell>
+                          <TableCell className="text-muted-foreground">{t.recordedBy.name}</TableCell>
+                          <TableCell className="text-muted-foreground">{new Date(t.createdAt).toLocaleString()}</TableCell>
+                        </TableRow>
+                        {isTxOpen && (
+                          <TableRow>
+                            <TableCell colSpan={6} className="bg-muted/30 p-3">
+                              <TransactionDetail tx={t} />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    )
+                  })}
                 </TableBody>
               </Table>
             )}

@@ -26,7 +26,10 @@ export default async function proxy(req: NextRequest) {
       req.nextUrl.pathname.startsWith(p)
     )
 
-    if (matchedPrefix && payload.role !== roleRoutes[matchedPrefix]) {
+    // Admin is a superset role: it can view/act as kitchen or waiter too
+    // (the sidebar's account switcher relies on this), so only waiter/kitchen
+    // accounts are actually confined to their own prefix.
+    if (matchedPrefix && payload.role !== 'admin' && payload.role !== roleRoutes[matchedPrefix]) {
       return NextResponse.redirect(new URL('/unauthorized', req.url))
     }
 

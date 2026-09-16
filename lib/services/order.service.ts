@@ -85,7 +85,7 @@ export async function createOrder(params: {
       }
     })
 
-    return tx.order.create({
+    const created = await tx.order.create({
       data: {
         table,
         createdById,
@@ -94,6 +94,16 @@ export async function createOrder(params: {
       },
       include: { items: true },
     })
+
+    await writeAuditLog(tx, {
+      userId: createdById,
+      action: 'order.created',
+      entityType: 'Order',
+      entityId: created.id,
+      afterData: created,
+    })
+
+    return created
   })
 }
 
@@ -102,12 +112,16 @@ export async function updateOrderItems(params: {
   add: OrderItemInput[]
   removeItemIds: string[]
   userId: string
+  role: string
 }) {
-  const { orderId, add, removeItemIds } = params
+  const { orderId, add, removeItemIds, userId, role } = params
 
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({ where: { id: orderId } })
     if (!order) throw new NotFoundError('Order not found')
+    if (role !== 'admin' && order.createdById !== userId) {
+      throw new ForbiddenError('Only the order\'s own waiter or an admin can edit its items')
+    }
     if (order.status !== 'pending') {
       throw new ConflictError('Order items can only be edited while the order is pending')
     }
@@ -133,19 +147,6 @@ export async function updateOrderItems(params: {
   })
 }
 
-export async function sendToKitchen(orderId: string, userId: string, role: string) {
-  const order = await prisma.order.findUnique({ where: { id: orderId } })
-  if (!order) throw new NotFoundError('Order not found')
-  if (role !== 'admin' && order.createdById !== userId) {
-    throw new ForbiddenError('Only the order\'s own waiter or an admin can send it to the kitchen')
-  }
-  if (order.status !== 'pending') {
-    throw new BusinessRuleError(`Cannot send an order to the kitchen from status ${order.status}`)
-  }
-
-  return prisma.order.update({ where: { id: orderId }, data: { status: 'preparing' } })
-}
-
 const VALID_ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   pending: ['preparing', 'cancelled'],
   preparing: ['ready', 'cancelled'],
@@ -155,9 +156,13 @@ const VALID_ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   cancelled: [],
 }
 
+// A waiter no longer pushes an order into the kitchen queue directly —
+// sending it to the kitchen was a status change waiters could trigger
+// themselves; now only kitchen (or admin) can pull an order out of pending
+// by explicitly starting it, which is what pending->preparing now means.
 const ROLE_ALLOWED_TARGETS: Record<string, OrderStatus[]> = {
   admin: ['preparing', 'ready', 'served', 'cancelled'],
-  kitchen: ['ready'],
+  kitchen: ['preparing', 'ready'],
   waiter: ['served', 'cancelled'],
 }
 
@@ -174,15 +179,29 @@ export async function updateOrderStatus(params: {
   }
 
   return prisma.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({
+    // Lock the row before checking status/ownership — without this, two
+    // kitchen users clicking "Start preparing" on the same pending order at
+    // once could both succeed, defeating "whoever starts it owns it".
+    const [locked] = await tx.$queryRaw<{ id: string; status: string; startedById: string | null }[]>`
+      SELECT id, status, "startedById" FROM orders WHERE id = ${orderId} FOR UPDATE
+    `
+    if (!locked) throw new NotFoundError('Order not found')
+
+    // Once a kitchen user has claimed an order (started it), only they —
+    // or an admin — can advance it further; other kitchen staff can still
+    // see it but any action on it is rejected.
+    if (role === 'kitchen' && locked.startedById && locked.startedById !== userId) {
+      throw new ForbiddenError('This order is already being handled by another kitchen user')
+    }
+
+    const order = await tx.order.findUniqueOrThrow({
       where: { id: orderId },
       include: { items: { include: { menuItem: { include: { recipeItems: true } } } } },
     })
-    if (!order) throw new NotFoundError('Order not found')
 
-    const allowed = VALID_ORDER_TRANSITIONS[order.status]
+    const allowed = VALID_ORDER_TRANSITIONS[locked.status as OrderStatus]
     if (!allowed.includes(newStatus)) {
-      throw new BusinessRuleError(`Cannot transition order from ${order.status} to ${newStatus}`)
+      throw new BusinessRuleError(`Cannot transition order from ${locked.status} to ${newStatus}`)
     }
 
     if (newStatus === 'ready') {
@@ -212,7 +231,24 @@ export async function updateOrderStatus(params: {
       }
     }
 
-    return tx.order.update({ where: { id: orderId }, data: { status: newStatus } })
+    const data: Prisma.OrderUncheckedUpdateInput = { status: newStatus }
+    if (locked.status === 'pending' && newStatus === 'preparing') {
+      data.startedById = userId
+      data.startedAt = new Date()
+    }
+
+    const updated = await tx.order.update({ where: { id: orderId }, data })
+
+    await writeAuditLog(tx, {
+      userId,
+      action: 'order.status_changed',
+      entityType: 'Order',
+      entityId: orderId,
+      beforeData: { status: order.status },
+      afterData: { status: updated.status },
+    })
+
+    return updated
   })
 }
 
@@ -220,12 +256,16 @@ export async function voidOrderItem(params: {
   orderItemId: string
   voidReason: string
   userId: string
+  role: string
 }) {
-  const { orderItemId, voidReason, userId } = params
+  const { orderItemId, voidReason, userId, role } = params
 
   return prisma.$transaction(async (tx) => {
     const orderItem = await tx.orderItem.findUnique({ where: { id: orderItemId }, include: { order: true } })
     if (!orderItem) throw new NotFoundError('Order item not found')
+    if (role === 'kitchen' && orderItem.order.startedById && orderItem.order.startedById !== userId) {
+      throw new ForbiddenError('This order is already being handled by another kitchen user')
+    }
     if (orderItem.isVoided) throw new ConflictError('Order item is already voided')
     if (orderItem.order.status === 'pending' || orderItem.order.status === 'cancelled' || orderItem.order.status === 'paid') {
       throw new BusinessRuleError(`Cannot void an item on an order in status ${orderItem.order.status}`)
@@ -266,24 +306,48 @@ export async function voidOrderItem(params: {
   })
 }
 
-export async function splitOrder(params: { orderId: string; itemIds: string[]; userId: string }) {
-  const { orderId, itemIds, userId } = params
+/**
+ * Splits by quantity per line, not whole rows: moving 1 of a ×3 line leaves
+ * a ×2 row behind and creates a new ×1 row on the new order, copying the
+ * price/cost/prep snapshot — nothing is re-priced or re-consumed, this is
+ * purely a billing split of stock that's already been accounted for.
+ */
+export async function splitOrder(params: {
+  orderId: string
+  items: { orderItemId: string; quantity: number }[]
+  userId: string
+  role: string
+}) {
+  const { orderId, items: requestedItems, userId, role } = params
+
+  const requestedIds = requestedItems.map((r) => r.orderItemId)
+  if (new Set(requestedIds).size !== requestedIds.length) {
+    throw new BusinessRuleError('Cannot split the same line twice in one request')
+  }
 
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } })
     if (!order) throw new NotFoundError('Order not found')
+    if (role !== 'admin' && order.createdById !== userId) {
+      throw new ForbiddenError('Only the order\'s own waiter or an admin can split it')
+    }
     if (order.status === 'paid' || order.status === 'cancelled') {
       throw new BusinessRuleError(`Cannot split an order in status ${order.status}`)
     }
 
-    const items = order.items.filter((i) => itemIds.includes(i.id))
-    if (items.length !== itemIds.length) {
-      throw new BusinessRuleError('One or more items do not belong to this order')
+    const requestedByItemId = new Map(requestedItems.map((r) => [r.orderItemId, r.quantity]))
+    for (const [orderItemId, quantity] of requestedByItemId) {
+      const item = order.items.find((i) => i.id === orderItemId)
+      if (!item) throw new BusinessRuleError('One or more items do not belong to this order')
+      if (item.isVoided) throw new BusinessRuleError('Cannot split a voided item onto a new order')
+      if (quantity > item.quantity) {
+        throw new BusinessRuleError(`Cannot split ${quantity} — only ${item.quantity} on that line`)
+      }
     }
-    if (items.some((i) => i.isVoided)) {
-      throw new BusinessRuleError('Cannot split a voided item onto a new order')
-    }
-    if (items.length === order.items.length) {
+
+    const totalActiveQty = order.items.filter((i) => !i.isVoided).reduce((s, i) => s + i.quantity, 0)
+    const totalMovedQty = [...requestedByItemId.values()].reduce((s, q) => s + q, 0)
+    if (totalMovedQty >= totalActiveQty) {
       throw new BusinessRuleError('Cannot split every item off an order — nothing would remain')
     }
 
@@ -296,17 +360,53 @@ export async function splitOrder(params: { orderId: string; itemIds: string[]; u
       },
     })
 
-    await tx.orderItem.updateMany({
-      where: { id: { in: itemIds } },
-      data: { orderId: newOrder.id },
+    for (const [orderItemId, quantity] of requestedByItemId) {
+      const item = order.items.find((i) => i.id === orderItemId)!
+      if (quantity === item.quantity) {
+        await tx.orderItem.update({ where: { id: item.id }, data: { orderId: newOrder.id } })
+      } else {
+        await tx.orderItem.update({ where: { id: item.id }, data: { quantity: item.quantity - quantity } })
+        await tx.orderItem.create({
+          data: {
+            orderId: newOrder.id,
+            menuItemId: item.menuItemId,
+            quantity,
+            priceAtSale: item.priceAtSale,
+            costAtSale: item.costAtSale,
+            preparedById: item.preparedById,
+            preparedAt: item.preparedAt,
+          },
+        })
+      }
+    }
+
+    await writeAuditLog(tx, {
+      userId,
+      action: 'order.split',
+      entityType: 'Order',
+      entityId: orderId,
+      beforeData: { itemCount: order.items.length },
+      afterData: { newOrderId: newOrder.id, moved: requestedItems },
+    })
+    await writeAuditLog(tx, {
+      userId,
+      action: 'order.created_from_split',
+      entityType: 'Order',
+      entityId: newOrder.id,
+      afterData: { splitFromId: orderId, moved: requestedItems },
     })
 
     return tx.order.findUniqueOrThrow({ where: { id: newOrder.id }, include: { items: true } })
   })
 }
 
-export async function mergeOrders(params: { sourceOrderId: string; targetOrderId: string; userId: string }) {
-  const { sourceOrderId, targetOrderId, userId } = params
+export async function mergeOrders(params: {
+  sourceOrderId: string
+  targetOrderId: string
+  userId: string
+  role: string
+}) {
+  const { sourceOrderId, targetOrderId, userId, role } = params
   if (sourceOrderId === targetOrderId) throw new BusinessRuleError('Cannot merge an order into itself')
 
   return prisma.$transaction(async (tx) => {
@@ -315,6 +415,11 @@ export async function mergeOrders(params: { sourceOrderId: string; targetOrderId
       tx.order.findUnique({ where: { id: targetOrderId } }),
     ])
     if (!source || !target) throw new NotFoundError('Order not found')
+    // A waiter may only merge two orders they BOTH created — admin can merge
+    // across waiters (e.g. tidying up after a mistake).
+    if (role !== 'admin' && (source.createdById !== userId || target.createdById !== userId)) {
+      throw new ForbiddenError('You can only merge orders you created')
+    }
     if (source.status === 'paid' || source.status === 'cancelled' || target.status === 'paid' || target.status === 'cancelled') {
       throw new BusinessRuleError('Both orders must be unpaid and not cancelled to merge')
     }
@@ -355,6 +460,9 @@ export async function applyDiscount(params: {
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } })
     if (!order) throw new NotFoundError('Order not found')
+    if (role !== 'admin' && order.createdById !== userId) {
+      throw new ForbiddenError('Only the order\'s own waiter or an admin can apply a discount')
+    }
     if (order.status === 'paid' || order.status === 'cancelled') {
       throw new BusinessRuleError(`Cannot discount an order in status ${order.status}`)
     }
@@ -392,9 +500,26 @@ export async function getOrderWithDetails(orderId: string) {
   return prisma.order.findUniqueOrThrow({
     where: { id: orderId },
     include: {
-      items: { include: { menuItem: true } },
-      payments: true,
+      items: {
+        include: {
+          menuItem: true,
+          preparedBy: { select: { name: true } },
+          voidedBy: { select: { name: true } },
+        },
+      },
+      payments: {
+        orderBy: { createdAt: 'asc' },
+        include: {
+          recordedBy: { select: { name: true } },
+          refunds: { orderBy: { createdAt: 'asc' }, include: { recordedBy: { select: { name: true } } } },
+          refundRequests: {
+            orderBy: { createdAt: 'desc' },
+            include: { requestedBy: { select: { name: true } }, reviewedBy: { select: { name: true } } },
+          },
+        },
+      },
       createdBy: { select: { name: true } },
+      startedBy: { select: { name: true } },
     },
   })
 }
