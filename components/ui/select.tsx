@@ -5,7 +5,38 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "cn"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+// Base UI's Select.Value only renders the selected item's LABEL if the root
+// is given an `items` map — otherwise it falls back to printing the raw
+// `value` (e.g. an id) verbatim. Every call site in this app builds its
+// options dynamically as <SelectItem value={x.id}>{x.name}</SelectItem>
+// children rather than a static items map, so this walks those children
+// once per render to build that map automatically — no call site needs to
+// change.
+function extractSelectItems(children: React.ReactNode): { value: unknown; label: React.ReactNode }[] {
+  const items: { value: unknown; label: React.ReactNode }[] = []
+  React.Children.forEach(children, (child) => {
+    if (!React.isValidElement(child)) return
+    if (child.type === SelectItem) {
+      const itemProps = child.props as { value: unknown; children: React.ReactNode }
+      items.push({ value: itemProps.value, label: itemProps.children })
+      return
+    }
+    const nested = (child.props as { children?: React.ReactNode } | null)?.children
+    if (nested) items.push(...extractSelectItems(nested))
+  })
+  return items
+}
+
+function Select<Value, Multiple extends boolean | undefined = false>({
+  children,
+  ...props
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
+  return (
+    <SelectPrimitive.Root items={extractSelectItems(children)} {...props}>
+      {children}
+    </SelectPrimitive.Root>
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (

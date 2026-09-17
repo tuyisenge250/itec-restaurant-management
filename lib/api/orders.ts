@@ -11,7 +11,6 @@ import {
   applyDiscountSchema,
   voidOrderItemSchema,
 } from '@/lib/validation/order.schema'
-import type { RefundRequest } from '@/lib/api/payments'
 
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'paid' | 'cancelled'
 export type Order = {
@@ -33,14 +32,12 @@ export type Order = {
 }
 
 // The admin order-operations page needs more than the base Order shape:
-// full payment + refund history.
+// full payment history.
 export type OrderDetail = Order & {
   payments: {
     id: string; method: 'cash' | 'card' | 'momo' | 'other'
     amount: number; discount: number; notes: string | null; createdAt: string
     recordedBy: { name: string }
-    refunds: { id: string; amount: number; reason: string | null; createdAt: string; recordedBy: { name: string } }[]
-    refundRequests: RefundRequest[]
   }[]
 }
 

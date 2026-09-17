@@ -199,6 +199,10 @@ export async function updateOrderStatus(params: {
       include: { items: { include: { menuItem: { include: { recipeItems: true } } } } },
     })
 
+    if (role === 'waiter' && order.createdById !== userId) {
+      throw new ForbiddenError('Only the order\'s own waiter or an admin can update it')
+    }
+
     const allowed = VALID_ORDER_TRANSITIONS[locked.status as OrderStatus]
     if (!allowed.includes(newStatus)) {
       throw new BusinessRuleError(`Cannot transition order from ${locked.status} to ${newStatus}`)
@@ -511,11 +515,6 @@ export async function getOrderWithDetails(orderId: string) {
         orderBy: { createdAt: 'asc' },
         include: {
           recordedBy: { select: { name: true } },
-          refunds: { orderBy: { createdAt: 'asc' }, include: { recordedBy: { select: { name: true } } } },
-          refundRequests: {
-            orderBy: { createdAt: 'desc' },
-            include: { requestedBy: { select: { name: true } }, reviewedBy: { select: { name: true } } },
-          },
         },
       },
       createdBy: { select: { name: true } },

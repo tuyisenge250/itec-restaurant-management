@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import type { DateRange } from 'react-day-picker'
-import { ListOrdered, History, RotateCcw, Loader2, ChefHat, Check, X } from 'lucide-react'
+import { ListOrdered, History, ChefHat, Ban } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -12,13 +12,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogCancel,
+} from '@/components/ui/alert-dialog'
 import { Card, CardContent } from '@/components/ui/card'
 import { DateRangePicker } from '@/components/date-range-picker'
-import { useOrders, useOrder, useOrderAuditLog, type Order, type OrderStatus } from '@/lib/api/orders'
+import { useOrders, useOrder, useOrderAuditLog, useUpdateOrderStatus, type Order, type OrderStatus } from '@/lib/api/orders'
 import { useUsers } from '@/lib/api/users'
-import {
-  useRefundPayment, useRefundRequests, useApproveRefundRequest, useDenyRefundRequest, type RefundRequest,
-} from '@/lib/api/payments'
 import { computeKitchenInfo, formatDuration } from '@/lib/kitchen-timing'
 import { rwf } from '@/lib/utils'
 
@@ -34,10 +35,6 @@ const ACTION_LABELS: Record<string, string> = {
   'order.created_from_split': 'Created from a split',
   'order_item.voided': 'Item voided',
   'payment.discount_applied': 'Payment discount applied',
-  'payment.refunded': 'Payment refunded',
-  'refund_request.created': 'Refund requested',
-  'refund_request.approved': 'Refund request approved',
-  'refund_request.denied': 'Refund request denied',
 }
 
 function toDateInput(d: Date) {
@@ -54,50 +51,23 @@ function orderMargin(order: Pick<Order, 'items'>) {
     .reduce((s, i) => s + (i.priceAtSale - i.costAtSale) * i.quantity, 0)
 }
 
-function RefundForm({ paymentId, maxRefundable }: { paymentId: string; maxRefundable: number }) {
-  const [amount, setAmount] = useState('')
-  const [reason, setReason] = useState('')
-  const refund = useRefundPayment()
-
-  if (maxRefundable <= 0) return null
-
-  async function submit() {
-    await refund.mutateAsync({ paymentId, data: { amount: parseFloat(amount), reason } })
-    setAmount(''); setReason('')
-  }
-
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border p-2">
-      <Input
-        type="number"
-        placeholder={`Amount (max ${maxRefundable.toFixed(2)})`}
-        className="w-44"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-      />
-      <Input placeholder="Reason" className="w-48" value={reason} onChange={(e) => setReason(e.target.value)} />
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={!amount || !reason || parseFloat(amount) > maxRefundable || refund.isPending}
-        onClick={submit}
-      >
-        {refund.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="mr-1 h-3.5 w-3.5" />}
-        Refund
-      </Button>
-    </div>
-  )
-}
-
 function OrderDetailDialog({ orderId, onClose }: { orderId: string | null; onClose: () => void }) {
   const { data: order, isLoading } = useOrder(orderId ?? undefined)
   const { data: auditData, isLoading: auditLoading } = useOrderAuditLog(orderId ?? undefined)
   const stockReversedIds = new Set(auditData?.stockReversedItemIds ?? [])
+  const updateStatus = useUpdateOrderStatus()
+  const [cancelOpen, setCancelOpen] = useState(false)
 
   const { preparedByNames, sentToKitchenAt, readyAt, kitchenDurationMs, inProgressMs } =
     computeKitchenInfo(order, auditData?.auditLog)
 
+  function handleCancel() {
+    if (!orderId) return
+    updateStatus.mutate({ id: orderId, status: 'cancelled' }, { onSuccess: () => setCancelOpen(false) })
+  }
+
   return (
+    <>
     <Dialog open={!!orderId} onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="max-h-[85vh] w-full max-w-[95vw] overflow-y-auto sm:max-w-[67vw]">
         <DialogHeader><DialogTitle>Order detail</DialogTitle></DialogHeader>
@@ -186,58 +156,19 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: string | null; onClo
                 <p className="text-sm text-muted-foreground">No payments recorded yet.</p>
               ) : (
                 <div className="flex flex-col gap-3">
-                  {(order.payments ?? []).map((p) => {
-                    const refundedTotal = (p.refunds ?? []).reduce((s, r) => s + r.amount, 0)
-                    const maxRefundable = p.amount - refundedTotal
-                    return (
-                      <div key={p.id} className="rounded-md border border-border p-3 text-sm">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span>
-                            <span className="font-medium uppercase">{p.method}</span> · {rwf(p.amount)}
-                            {p.discount > 0 ? ` (discount ${rwf(p.discount)})` : ''}
-                          </span>
-                          <span className="text-muted-foreground">
-                            {p.recordedBy?.name ?? 'Unknown'} · {new Date(p.createdAt).toLocaleString()}
-                          </span>
-                        </div>
-                        {(p.refunds ?? []).length > 0 && (
-                          <ul className="mt-2 flex flex-col gap-1 border-t border-border pt-2">
-                            {(p.refunds ?? []).map((r) => (
-                              <li key={r.id} className="flex justify-between text-xs text-muted-foreground">
-                                <span>
-                                  Refunded {rwf(r.amount)} by <span className="font-medium text-foreground">{r.recordedBy?.name ?? 'Unknown'}</span>
-                                  {r.reason ? ` — ${r.reason}` : ''}
-                                </span>
-                                <span>{new Date(r.createdAt).toLocaleString()}</span>
-                              </li>
-                            ))}
-                            <li className="text-xs font-medium text-foreground">
-                              Cumulative refunded: {rwf(refundedTotal)} of {rwf(p.amount)}
-                            </li>
-                          </ul>
-                        )}
-                        {(p.refundRequests ?? []).filter((r) => r.status === 'pending').map((r) => (
-                          <div key={r.id} className="mt-2 flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs">
-                            <p>
-                              Refund request: {rwf(r.amount)} by <span className="font-medium">{r.requestedBy.name}</span>
-                              {r.reason ? ` — ${r.reason}` : ''}
-                            </p>
-                            <RefundRequestActions request={r} />
-                          </div>
-                        ))}
-                        {(() => {
-                          const lastDenied = (p.refundRequests ?? []).find((r) => r.status === 'denied')
-                          return lastDenied ? (
-                            <p className="mt-2 text-xs text-destructive">
-                              Last refund request denied{lastDenied.denialReason ? ` — ${lastDenied.denialReason}` : ''}
-                              {lastDenied.reviewedBy ? ` (by ${lastDenied.reviewedBy.name})` : ''}
-                            </p>
-                          ) : null
-                        })()}
-                        <RefundForm paymentId={p.id} maxRefundable={maxRefundable} />
+                  {(order.payments ?? []).map((p) => (
+                    <div key={p.id} className="rounded-md border border-border p-3 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span>
+                          <span className="font-medium uppercase">{p.method}</span> · {rwf(p.amount)}
+                          {p.discount > 0 ? ` (discount ${rwf(p.discount)})` : ''}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {p.recordedBy?.name ?? 'Unknown'} · {new Date(p.createdAt).toLocaleString()}
+                        </span>
                       </div>
-                    )
-                  })}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -265,88 +196,33 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: string | null; onClo
           </div>
         )}
         <DialogFooter>
+          {order?.status === 'pending' && (
+            <Button variant="destructive" onClick={() => setCancelOpen(true)}>
+              <Ban className="mr-2 h-4 w-4" />Cancel order
+            </Button>
+          )}
           <Button variant="outline" onClick={onClose}>Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
 
-// Shared by the global "pending requests" panel and the per-order payments
-// list, so approving/denying works identically wherever an admin spots one.
-function RefundRequestActions({ request }: { request: RefundRequest }) {
-  const approve = useApproveRefundRequest()
-  const deny = useDenyRefundRequest()
-  const [denying, setDenying] = useState(false)
-  const [denyReason, setDenyReason] = useState('')
-
-  if (denying) {
-    return (
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          placeholder="Denial reason (optional)"
-          className="w-56"
-          value={denyReason}
-          onChange={(e) => setDenyReason(e.target.value)}
-        />
-        <Button
-          size="sm"
-          variant="destructive"
-          disabled={deny.isPending}
-          onClick={() =>
-            deny.mutate(
-              { id: request.id, data: { denialReason: denyReason || undefined } },
-              { onSuccess: () => { setDenying(false); setDenyReason('') } }
-            )
-          }
-        >
-          Confirm deny
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => { setDenying(false); setDenyReason('') }}>Cancel</Button>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex gap-2">
-      <Button size="sm" disabled={approve.isPending} onClick={() => approve.mutate(request.id)}>
-        {approve.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1 h-3.5 w-3.5" />}
-        Approve
-      </Button>
-      <Button size="sm" variant="outline" onClick={() => setDenying(true)}>
-        <X className="mr-1 h-3.5 w-3.5" />Deny
-      </Button>
-    </div>
-  )
-}
-
-function RefundRequestsPanel() {
-  const { data: requests = [], isLoading } = useRefundRequests('pending')
-
-  if (isLoading || requests.length === 0) return null
-
-  return (
-    <Card className="border-warning/40">
-      <CardContent className="flex flex-col gap-3 p-4">
-        <p className="flex items-center gap-1.5 text-sm font-medium">
-          <RotateCcw className="h-3.5 w-3.5" />
-          Pending refund requests ({requests.length})
-        </p>
-        {requests.map((r) => (
-          <div key={r.id} className="flex flex-col gap-2 rounded-md border border-border p-3 text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span>
-                Table {r.payment.order.table} · <span className="uppercase">{r.payment.method}</span> · requested {rwf(r.amount)} by{' '}
-                <span className="font-medium">{r.requestedBy.name}</span>
-              </span>
-              <span className="text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</span>
-            </div>
-            <p className="text-muted-foreground">Reason: {r.reason}</p>
-            <RefundRequestActions request={r} />
-          </div>
-        ))}
-      </CardContent>
-    </Card>
+    <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Cancel this order?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This order hasn&apos;t been started by the kitchen yet. Cancelling it can&apos;t be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep order</AlertDialogCancel>
+          <Button variant="destructive" disabled={updateStatus.isPending} onClick={handleCancel}>
+            Cancel order
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }
 
@@ -377,8 +253,6 @@ export default function AdminOrdersPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Orders" description="Every order across all waiters and tables" />
-
-      <RefundRequestsPanel />
 
       <Card>
         <CardContent className="flex flex-row flex-wrap items-end gap-3 p-4">

@@ -8,17 +8,3 @@ export const createPaymentSchema = z.object({
   discountReason: z.string().optional(),
   notes: z.string().optional(),
 })
-
-export const refundPaymentSchema = z.object({
-  amount: z.number().positive(),
-  reason: z.string().min(1),
-})
-
-export const requestRefundSchema = z.object({
-  amount: z.number().positive(),
-  reason: z.string().min(1),
-})
-
-export const denyRefundRequestSchema = z.object({
-  denialReason: z.string().optional(),
-})

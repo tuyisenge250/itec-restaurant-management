@@ -1,6 +1,6 @@
 // Money fields are stored as Float in Postgres (no schema-level Decimal type
-// in use), so every comparison/sum that must be exact (payments, refunds,
-// discounts) is done in integer cents here rather than on raw floats.
+// in use), so every comparison/sum that must be exact (payments, discounts)
+// is done in integer cents here rather than on raw floats.
 
 export function toCents(amount: number): number {
   return Math.round(amount * 100)

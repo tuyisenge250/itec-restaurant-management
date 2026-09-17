@@ -3,6 +3,7 @@ import { requireRole } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 import { BusinessRuleError } from '@/lib/errors'
+import { parseUpperBoundDate } from '@/lib/date-range'
 
 const PAGE_SIZE = 50
 
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
     const where = {
       entityType,
       userId,
-      createdAt: from || to ? { gte: from ? new Date(from) : undefined, lte: to ? new Date(to) : undefined } : undefined,
+      createdAt: from || to ? { gte: from ? new Date(from) : undefined, lte: to ? parseUpperBoundDate(to) : undefined } : undefined,
     }
 
     const [entries, total] = await Promise.all([

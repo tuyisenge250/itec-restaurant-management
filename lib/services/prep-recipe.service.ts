@@ -61,8 +61,14 @@ export async function createPrepRecipe(params: {
  * Runs one production batch: checks every input has enough stock BEFORE
  * consuming any of it (input 2-of-3 short => nothing is consumed), then
  * draws each input via the shared consumeStock function, and prices the
- * output lot from what was ACTUALLY consumed (+ labor) over the ACTUAL
- * quantity produced — never the recipe's theoretical yield/cost.
+ * output lot from what was ACTUALLY consumed over the ACTUAL quantity
+ * produced — never the recipe's theoretical yield/cost.
+ *
+ * laborCost is recorded on the PrepProductionRun for reference but is
+ * deliberately NOT folded into unitCost/COGS — labor is tracked as a period
+ * Expense instead (see lib/services/expense.service.ts), so recipe costing
+ * only ever reflects ingredients. Folding both in would double-count labor
+ * once it's also logged as a "Salaries"-type expense.
  */
 export async function producePrepRecipe(params: {
   prepRecipeId: string
@@ -102,7 +108,7 @@ export async function producePrepRecipe(params: {
       consumedCost += totalCost
     }
 
-    const unitCost = (consumedCost + laborCost) / quantityProduced
+    const unitCost = consumedCost / quantityProduced
 
     const producedLot = await tx.inventoryLot.create({
       data: {

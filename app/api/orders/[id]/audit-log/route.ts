@@ -6,8 +6,8 @@ import { handleApiError } from '@/lib/api-error'
 
 // Merges every audit trail touching this order into one chronological
 // timeline: order-level events (created, sent to kitchen, status changes,
-// discounts, merges), item-level events (voids), and payment/refund events —
-// each logged under its own entityType/entityId, so they have to be gathered
+// discounts, merges), item-level events (voids), and payment events — each
+// logged under its own entityType/entityId, so they have to be gathered
 // separately and stitched together here. Admin and kitchen see any order
 // (kitchen fulfills every table's tickets, not just ones they created); a
 // waiter can see only the timeline of an order they created (e.g. "who's
@@ -22,7 +22,7 @@ export async function GET(
 
     const order = await prisma.order.findUniqueOrThrow({
       where: { id },
-      include: { items: { select: { id: true, isVoided: true } }, payments: { include: { refunds: { select: { id: true } } } } },
+      include: { items: { select: { id: true, isVoided: true } }, payments: { select: { id: true } } },
     })
     if (user.role === 'waiter' && order.createdById !== user.sub) {
       throw new ForbiddenError('You can only view the history of orders you created')
@@ -31,7 +31,6 @@ export async function GET(
     const itemIds = order.items.map((i) => i.id)
     const voidedItemIds = order.items.filter((i) => i.isVoided).map((i) => i.id)
     const paymentIds = order.payments.map((p) => p.id)
-    const refundIds = order.payments.flatMap((p) => p.refunds.map((r) => r.id))
 
     const [auditLog, reversalTxns] = await Promise.all([
       prisma.auditLog.findMany({
@@ -40,7 +39,6 @@ export async function GET(
             { entityType: 'Order', entityId: id },
             ...(itemIds.length ? [{ entityType: 'OrderItem', entityId: { in: itemIds } }] : []),
             ...(paymentIds.length ? [{ entityType: 'Payment', entityId: { in: paymentIds } }] : []),
-            ...(refundIds.length ? [{ entityType: 'Refund', entityId: { in: refundIds } }] : []),
           ],
         },
         orderBy: { createdAt: 'asc' },

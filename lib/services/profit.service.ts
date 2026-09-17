@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import type { Order, OrderItem, Payment } from '@prisma/client'
+import { NotFoundError } from '@/lib/errors'
 
 type PaidOrder = Order & { items: OrderItem[]; payments: Payment[] }
 
@@ -142,34 +143,21 @@ export async function getPaymentMethodBreakdown(params: { from: Date; to: Date }
     where: { createdAt: { gte: from, lte: to } },
   })
 
-  const byMethod = new Map<string, { amount: number; refunded: number; count: number }>()
+  const byMethod = new Map<string, { amount: number; count: number }>()
   for (const p of payments) {
-    const existing = byMethod.get(p.method) ?? { amount: 0, refunded: 0, count: 0 }
+    const existing = byMethod.get(p.method) ?? { amount: 0, count: 0 }
     existing.amount += p.amount
     existing.count += 1
     byMethod.set(p.method, existing)
   }
 
-  const refunds = await prisma.refund.findMany({
-    where: { createdAt: { gte: from, lte: to } },
-    include: { payment: { select: { method: true } } },
-  })
-  for (const r of refunds) {
-    const existing = byMethod.get(r.payment.method) ?? { amount: 0, refunded: 0, count: 0 }
-    existing.refunded += r.amount
-    byMethod.set(r.payment.method, existing)
-  }
-
-  return Array.from(byMethod.entries()).map(([method, data]) => ({
-    method,
-    ...data,
-    net: data.amount - data.refunded,
-  }))
+  return Array.from(byMethod.entries()).map(([method, data]) => ({ method, ...data }))
 }
 
 /**
- * Waste cost for a date range — pure loss, kept separate from sold COGS on
- * the P&L. Anchored on its own createdAt (waste isn't tied to a payment).
+ * Waste cost for a date range — pure loss, kept separate from sold COGS
+ * (the caller folds it into expenses/netProfit instead). Anchored on its
+ * own createdAt (waste isn't tied to a payment).
  */
 export async function getWasteCost(params: { from: Date; to: Date }) {
   const { from, to } = params
@@ -181,4 +169,77 @@ export async function getWasteCost(params: { from: Date; to: Date }) {
   const totalCost = wasteTransactions.reduce((sum, tx) => sum + Math.abs(tx.quantity) * tx.unitCost, 0)
 
   return { transactionCount: wasteTransactions.length, totalCost }
+}
+
+/**
+ * Per-menu-item drill-down for the "Profit by menu item" row: exactly which
+ * ingredient consumption produced its COGS, plus waste on that same item's
+ * ingredients over the same range — context for why a row's margin looks
+ * the way it does. Consumption is read from the actual recorded
+ * InventoryTransaction rows (source: 'sale', referenceId: the sold
+ * OrderItem's id) rather than recomputed from the recipe, so it reflects
+ * the real lot draws (FIFO/LIFO) rather than a flat recipe-quantity estimate.
+ */
+export async function getMenuItemDetail(params: { menuItemId: string; from: Date; to: Date }) {
+  const { menuItemId, from, to } = params
+
+  const menuItem = await prisma.menuItem.findUnique({
+    where: { id: menuItemId },
+    include: { recipeItems: { select: { inventoryItemId: true } } },
+  })
+  if (!menuItem) throw new NotFoundError('Menu item not found')
+
+  const orders = await getPaidOrdersInRange(from, to)
+  const soldItemIds: string[] = []
+  let quantitySold = 0
+  for (const order of orders) {
+    for (const item of order.items) {
+      if (item.isVoided || item.menuItemId !== menuItemId) continue
+      soldItemIds.push(item.id)
+      quantitySold += item.quantity
+    }
+  }
+
+  const consumptionTx = soldItemIds.length
+    ? await prisma.inventoryTransaction.findMany({
+        where: { type: 'consumption', source: 'sale', referenceId: { in: soldItemIds } },
+        include: { inventoryItem: { select: { name: true, unit: true } } },
+      })
+    : []
+
+  const consumptionByItem = new Map<string, { name: string; unit: string; quantity: number; cost: number }>()
+  for (const tx of consumptionTx) {
+    const existing = consumptionByItem.get(tx.inventoryItemId) ??
+      { name: tx.inventoryItem.name, unit: tx.inventoryItem.unit, quantity: 0, cost: 0 }
+    existing.quantity += Math.abs(tx.quantity)
+    existing.cost += Math.abs(tx.quantity) * tx.unitCost
+    consumptionByItem.set(tx.inventoryItemId, existing)
+  }
+
+  const recipeIngredientIds = menuItem.recipeItems.map((r) => r.inventoryItemId)
+  const wasteTx = recipeIngredientIds.length
+    ? await prisma.inventoryTransaction.findMany({
+        where: { type: 'waste', inventoryItemId: { in: recipeIngredientIds }, createdAt: { gte: from, lte: to } },
+        include: { inventoryItem: { select: { name: true, unit: true } } },
+        orderBy: { createdAt: 'desc' },
+      })
+    : []
+
+  const wasteByItem = new Map<string, { name: string; unit: string; quantity: number; cost: number; transactionCount: number }>()
+  for (const tx of wasteTx) {
+    const existing = wasteByItem.get(tx.inventoryItemId) ??
+      { name: tx.inventoryItem.name, unit: tx.inventoryItem.unit, quantity: 0, cost: 0, transactionCount: 0 }
+    existing.quantity += Math.abs(tx.quantity)
+    existing.cost += Math.abs(tx.quantity) * tx.unitCost
+    existing.transactionCount += 1
+    wasteByItem.set(tx.inventoryItemId, existing)
+  }
+
+  return {
+    menuItemId,
+    name: menuItem.name,
+    quantitySold,
+    consumption: Array.from(consumptionByItem.entries()).map(([inventoryItemId, d]) => ({ inventoryItemId, ...d })),
+    waste: Array.from(wasteByItem.entries()).map(([inventoryItemId, d]) => ({ inventoryItemId, ...d })),
+  }
 }

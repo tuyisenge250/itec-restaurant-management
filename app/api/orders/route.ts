@@ -5,6 +5,7 @@ import { createOrderSchema } from '@/lib/validation/order.schema'
 import { createOrder } from '@/lib/services/order.service'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
+import { parseUpperBoundDate } from '@/lib/date-range'
 
 const ORDER_STATUSES = Object.values(OrderStatus)
 
@@ -43,7 +44,7 @@ export async function GET(req: NextRequest) {
       createdById: waiterId,
     }
     if (from || to) {
-      where.createdAt = { gte: from ? new Date(from) : undefined, lte: to ? new Date(to) : undefined }
+      where.createdAt = { gte: from ? new Date(from) : undefined, lte: to ? parseUpperBoundDate(to) : undefined }
     }
 
     const orders = await prisma.order.findMany({

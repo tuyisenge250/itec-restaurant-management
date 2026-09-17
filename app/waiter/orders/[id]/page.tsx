@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, CreditCard, Plus, Minus, X, Split, Merge, Percent } from 'lucide-react'
+import { ArrowLeft, CreditCard, Plus, Minus, X, Split, Merge, Percent, Ban } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { Button } from '@/components/ui/button'
@@ -15,8 +15,12 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogCancel,
+} from '@/components/ui/alert-dialog'
+import {
   useOrder, useOrders, useOrderAuditLog, useUpdateOrderItems,
-  useSplitOrder, useMergeOrder, useApplyOrderDiscount,
+  useSplitOrder, useMergeOrder, useApplyOrderDiscount, useUpdateOrderStatus,
 } from '@/lib/api/orders'
 import { useMenu } from '@/lib/api/menu'
 import { useCurrentUser } from '@/lib/api/auth'
@@ -44,6 +48,7 @@ export default function OrderDetailPage() {
   const splitOrder = useSplitOrder()
   const mergeOrder = useMergeOrder()
   const applyDiscount = useApplyOrderDiscount()
+  const updateStatus = useUpdateOrderStatus()
 
   const [addMenuItemId, setAddMenuItemId] = useState('')
   const [splitOpen, setSplitOpen] = useState(false)
@@ -53,6 +58,7 @@ export default function OrderDetailPage() {
   const [discountOpen, setDiscountOpen] = useState(false)
   const [discountPercent, setDiscountPercent] = useState('')
   const [discountReason, setDiscountReason] = useState('')
+  const [cancelOpen, setCancelOpen] = useState(false)
 
   if (isLoading) return (
     <div className="flex flex-col gap-4">
@@ -128,6 +134,12 @@ export default function OrderDetailPage() {
     const pct = parseFloat(discountPercent) || 0
     await applyDiscount.mutateAsync({ id: order.id, data: { discountPercent: pct, discountReason } })
     setDiscountOpen(false)
+  }
+
+  async function handleCancel() {
+    if (!order) return
+    await updateStatus.mutateAsync({ id: order.id, status: 'cancelled' })
+    setCancelOpen(false)
   }
 
   return (
@@ -275,7 +287,29 @@ export default function OrderDetailPage() {
             <Button className="w-full"><CreditCard className="mr-2 h-4 w-4" />Record payment</Button>
           </Link>
         )}
+        {isPending && (
+          <Button variant="destructive" className="col-span-2" onClick={() => setCancelOpen(true)}>
+            <Ban className="mr-2 h-4 w-4" />Cancel order
+          </Button>
+        )}
       </div>
+
+      <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel this order?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This order hasn&apos;t been started by the kitchen yet. Cancelling it can&apos;t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep order</AlertDialogCancel>
+            <Button variant="destructive" disabled={updateStatus.isPending} onClick={handleCancel}>
+              Cancel order
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Split dialog */}
       <Dialog open={splitOpen} onOpenChange={(o) => { setSplitOpen(o); if (!o) setSplitQuantities({}) }}>

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ClipboardList, Info } from 'lucide-react'
+import { ClipboardList, Info, Ban } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -12,6 +12,10 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogCancel,
+} from '@/components/ui/alert-dialog'
 import { useOrders, useOrderAuditLog, useUpdateOrderStatus, type Order } from '@/lib/api/orders'
 import { computeKitchenInfo, formatDuration } from '@/lib/kitchen-timing'
 import { rwf } from '@/lib/utils'
@@ -75,6 +79,7 @@ export default function WaiterOrdersPage() {
   const router = useRouter()
   const [showHistory, setShowHistory] = useState(false)
   const [progressOrder, setProgressOrder] = useState<Order | null>(null)
+  const [cancelTarget, setCancelTarget] = useState<Order | null>(null)
   // /api/orders is force-scoped server-side to orders this waiter created —
   // there's no "all orders" view for this role, only active vs. full history.
   const { data: orders = [], isLoading } = useOrders()
@@ -162,6 +167,11 @@ export default function WaiterOrdersPage() {
                               <Button size="sm" variant="outline">Receipt</Button>
                             </Link>
                           )}
+                          {o.status === 'pending' && (
+                            <Button size="sm" variant="destructive" onClick={() => setCancelTarget(o)}>
+                              <Ban className="mr-1 h-3.5 w-3.5" />Cancel
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -174,6 +184,31 @@ export default function WaiterOrdersPage() {
       </Card>
 
       <OrderProgressDialog order={progressOrder} onClose={() => setProgressOrder(null)} />
+
+      <AlertDialog open={!!cancelTarget} onOpenChange={(o) => { if (!o) setCancelTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel order — Table {cancelTarget?.table}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This order hasn&apos;t been started by the kitchen yet. Cancelling it can&apos;t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep order</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={updateStatus.isPending}
+              onClick={() => {
+                if (!cancelTarget) return
+                updateStatus.mutate({ id: cancelTarget.id, status: 'cancelled' })
+                setCancelTarget(null)
+              }}
+            >
+              Cancel order
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

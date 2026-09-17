@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { CreditCard, Loader2, Printer, Undo2 } from 'lucide-react'
+import { CreditCard, Loader2, Printer } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,12 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { useOrder } from '@/lib/api/orders'
-import {
-  useCreatePayment, usePayments, useRefundPayment, useRequestRefund,
-  type Payment, type CreatePaymentInput,
-} from '@/lib/api/payments'
-import { useCurrentUser } from '@/lib/api/auth'
-import { REFUND_CAPS } from '@/lib/rbac'
+import { useCreatePayment, usePayments, type CreatePaymentInput } from '@/lib/api/payments'
 import { rwf } from '@/lib/utils'
 
 const METHODS: { value: CreatePaymentInput['method']; label: string }[] = [
@@ -34,11 +29,7 @@ export default function PaymentPage() {
   const router = useRouter()
   const { data: order, isLoading } = useOrder(orderId)
   const { data: payments = [] } = usePayments(orderId)
-  const { data: me } = useCurrentUser()
   const createPayment = useCreatePayment()
-  const refundPayment = useRefundPayment()
-  const requestRefund = useRequestRefund()
-  const refundCap = me ? REFUND_CAPS[me.role] : 0
 
   const [method, setMethod] = useState<CreatePaymentInput['method']>('cash')
   const [amount, setAmount] = useState('')
@@ -46,9 +37,6 @@ export default function PaymentPage() {
   const [discountReason, setDiscountReason] = useState('')
   const [notes, setNotes] = useState('')
   const [error, setError] = useState('')
-  const [refundTarget, setRefundTarget] = useState<Payment | null>(null)
-  const [refundAmount, setRefundAmount] = useState('')
-  const [refundReason, setRefundReason] = useState('')
   const [receiptOpen, setReceiptOpen] = useState(false)
 
   if (isLoading) return <div className="flex flex-col gap-4"><Skeleton className="h-12 w-64" /><Skeleton className="h-48 w-full" /></div>
@@ -85,22 +73,6 @@ export default function PaymentPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Payment failed.')
     }
-  }
-
-  async function handleRefund() {
-    if (!refundTarget) return
-    const alreadyRefunded = refundTarget.refunds.reduce((s, r) => s + r.amount, 0)
-    const capAmount = refundTarget.amount * (refundCap / 100)
-    const amountN = parseFloat(refundAmount) || 0
-    const data = { amount: amountN, reason: refundReason }
-    // Within the role's cap: refund immediately. Over it: this becomes a
-    // request an admin has to approve rather than a hard rejection.
-    if (alreadyRefunded + amountN <= capAmount + 0.001) {
-      await refundPayment.mutateAsync({ paymentId: refundTarget.id, data })
-    } else {
-      await requestRefund.mutateAsync({ paymentId: refundTarget.id, data })
-    }
-    setRefundTarget(null); setRefundAmount(''); setRefundReason('')
   }
 
   return (
@@ -143,37 +115,12 @@ export default function PaymentPage() {
         <Card>
           <CardHeader className="pb-3"><CardTitle className="text-base">Payments recorded</CardTitle></CardHeader>
           <CardContent className="flex flex-col gap-2 pb-4">
-            {payments.map((p) => {
-              const refunded = p.refunds.reduce((s, r) => s + r.amount, 0)
-              const ownPayment = me && p.recordedById === me.id
-              const pendingRequest = p.refundRequests.find((r) => r.status === 'pending')
-              const lastDenied = !pendingRequest ? p.refundRequests.find((r) => r.status === 'denied') : undefined
-              return (
-                <div key={p.id} className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <div>
-                      <span className="capitalize">{p.method}</span> — {rwf(p.amount)}
-                      {refunded > 0 && <span className="ml-2 text-xs text-muted-foreground">({rwf(refunded)} refunded)</span>}
-                    </div>
-                    {!ownPayment ? (
-                      <span className="text-xs text-muted-foreground">Recorded by {p.recordedBy.name}</span>
-                    ) : pendingRequest ? (
-                      <span className="text-xs font-medium text-warning-foreground">Refund request pending approval</span>
-                    ) : (
-                      <Button size="sm" variant="ghost" onClick={() => setRefundTarget(p)} disabled={refunded >= p.amount}>
-                        <Undo2 className="mr-1 h-3.5 w-3.5" />Refund
-                      </Button>
-                    )}
-                  </div>
-                  {lastDenied && (
-                    <p className="text-xs text-destructive">
-                      Last refund request denied{lastDenied.denialReason ? ` — ${lastDenied.denialReason}` : ''}
-                      {lastDenied.reviewedBy ? ` (by ${lastDenied.reviewedBy.name})` : ''}
-                    </p>
-                  )}
-                </div>
-              )
-            })}
+            {payments.map((p) => (
+              <div key={p.id} className="flex items-center justify-between text-sm">
+                <span className="capitalize">{p.method}</span> — {rwf(p.amount)}
+                <span className="text-xs text-muted-foreground">Recorded by {p.recordedBy.name}</span>
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}
@@ -224,57 +171,6 @@ export default function PaymentPage() {
           </CardContent>
         </Card>
       )}
-
-      <Dialog open={!!refundTarget} onOpenChange={(o) => { if (!o) setRefundTarget(null) }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Refund payment</DialogTitle></DialogHeader>
-          {refundTarget && (() => {
-            const alreadyRefunded = refundTarget.refunds.reduce((s, r) => s + r.amount, 0)
-            const capAmount = refundTarget.amount * (refundCap / 100)
-            const maxRefundable = Math.max(capAmount - alreadyRefunded, 0)
-            const amountN = parseFloat(refundAmount) || 0
-            const overCap = amountN > maxRefundable + 0.001
-            return (
-              <>
-                <p className="text-sm text-muted-foreground">
-                  Paid {rwf(refundTarget.amount)} · already refunded {rwf(alreadyRefunded)} ·<br />
-                  your role can refund up to {refundCap}% of this payment — {rwf(maxRefundable)} left before an admin is needed
-                </p>
-                {amountN > 0 && (
-                  <p className={`text-xs font-medium ${overCap ? 'text-warning-foreground' : 'text-success'}`}>
-                    {overCap
-                      ? 'This exceeds your cap — it will be sent to an admin as a refund request instead of refunding immediately.'
-                      : 'Within your cap — this will refund immediately.'}
-                  </p>
-                )}
-              </>
-            )
-          })()}
-          <div className="flex flex-col gap-1.5">
-            <Label>Refund amount</Label>
-            <Input type="number" value={refundAmount} onChange={(e) => setRefundAmount(e.target.value)} />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Reason</Label>
-            <Input value={refundReason} onChange={(e) => setRefundReason(e.target.value)} />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRefundTarget(null)}>Cancel</Button>
-            <Button
-              disabled={!refundAmount || !refundReason.trim() || refundPayment.isPending || requestRefund.isPending}
-              onClick={handleRefund}
-            >
-              {(() => {
-                if (!refundTarget) return 'Refund'
-                const alreadyRefunded = refundTarget.refunds.reduce((s, r) => s + r.amount, 0)
-                const capAmount = refundTarget.amount * (refundCap / 100)
-                const amountN = parseFloat(refundAmount) || 0
-                return alreadyRefunded + amountN <= capAmount + 0.001 ? 'Refund' : 'Submit request'
-              })()}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={receiptOpen} onOpenChange={setReceiptOpen}>
         <DialogContent className="print:shadow-none">

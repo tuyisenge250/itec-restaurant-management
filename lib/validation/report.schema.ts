@@ -1,4 +1,5 @@
 import { BusinessRuleError } from '@/lib/errors'
+import { parseUpperBoundDate } from '@/lib/date-range'
 
 const MAX_RANGE_DAYS = 366
 const MAX_RANGE_MS = MAX_RANGE_DAYS * 24 * 60 * 60 * 1000
@@ -11,7 +12,7 @@ export function parseReportDateRange(searchParams: URLSearchParams) {
   const toParam = searchParams.get('to')
 
   const from = fromParam ? new Date(fromParam) : new Date(new Date().setHours(0, 0, 0, 0))
-  const to = toParam ? new Date(toParam) : new Date()
+  const to = toParam ? parseUpperBoundDate(toParam) : new Date()
 
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
     throw new BusinessRuleError('Invalid date range')

@@ -36,9 +36,7 @@ model User {
   preparedOrderItems     OrderItem[]            @relation("PreparedByKitchen")
   voidedOrderItems       OrderItem[]            @relation("VoidedByUser")
   payments               Payment[]              @relation("RecordedByUser")
-  refunds                Refund[]               @relation("RefundedByUser")
-  refundRequestsMade     RefundRequest[]        @relation("RefundRequestedBy")
-  refundRequestsReviewed RefundRequest[]        @relation("RefundRequestReviewedBy")
+  expensesRecorded       Expense[]              @relation("ExpenseRecordedBy")
   auditLogs              AuditLog[]
 
   @@map("users")
@@ -436,53 +434,7 @@ model Payment {
   notes        String?
   createdAt    DateTime      @default(now())
 
-  refunds        Refund[]
-  refundRequests RefundRequest[]
-
   @@map("payments")
-}
-
-model Refund {
-  id           String         @id @default(cuid())
-  paymentId    String
-  payment      Payment        @relation(fields: [paymentId], references: [id])
-  amount       Float // full refund = payment.amount; partial = less
-  reason       String?
-  recordedById String
-  recordedBy   User           @relation("RefundedByUser", fields: [recordedById], references: [id])
-  createdAt    DateTime       @default(now())
-  fromRequest  RefundRequest?
-
-  @@map("refunds")
-}
-
-enum RefundRequestStatus {
-  pending
-  approved
-  denied
-}
-
-// A refund above a non-admin's cap isn't auto-rejected — it becomes a
-// request an admin has to approve or deny. Approving creates the actual
-// Refund (money only ever moves on approval, never on request).
-model RefundRequest {
-  id                String              @id @default(cuid())
-  paymentId         String
-  payment           Payment             @relation(fields: [paymentId], references: [id])
-  amount            Float
-  reason            String
-  requestedById     String
-  requestedBy       User                @relation("RefundRequestedBy", fields: [requestedById], references: [id])
-  status            RefundRequestStatus @default(pending)
-  reviewedById      String?
-  reviewedBy        User?               @relation("RefundRequestReviewedBy", fields: [reviewedById], references: [id])
-  reviewedAt        DateTime?
-  denialReason      String?
-  resultingRefundId String?             @unique
-  resultingRefund   Refund?             @relation(fields: [resultingRefundId], references: [id])
-  createdAt         DateTime            @default(now())
-
-  @@map("refund_requests")
 }
 
 // ─────────────────────────────────────────────
@@ -504,6 +456,38 @@ model DailyCloseOut {
   createdAt      DateTime @default(now())
 
   @@map("daily_close_outs")
+}
+
+// Admin-managed, not a hardcoded enum — same pattern as MenuCategory.
+model ExpenseCategory {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  isActive Boolean @default(true)
+
+  expenses Expense[]
+
+  @@map("expense_categories")
+}
+
+model Expense {
+  id           String          @id @default(cuid())
+  categoryId   String
+  category     ExpenseCategory @relation(fields: [categoryId], references: [id])
+  amount       Float
+  expenseDate  DateTime        @db.Date // the period this expense belongs to — reporting always
+  // queries this, never createdAt (when it was entered)
+  description  String?
+  isRecurring  Boolean         @default(false) // a label only — no automation re-creates it each period
+  recordedById String
+  recordedBy   User            @relation("ExpenseRecordedBy", fields: [recordedById], references: [id])
+  // Soft-deleted, not hard-deleted: a report run "as of last month" must stay
+  // reproducible even if someone later deletes an old expense.
+  isDeleted    Boolean         @default(false)
+  createdAt    DateTime        @default(now())
+
+  @@index([expenseDate])
+  @@index([categoryId, expenseDate])
+  @@map("expenses")
 }
 
 // ─────────────────────────────────────────────

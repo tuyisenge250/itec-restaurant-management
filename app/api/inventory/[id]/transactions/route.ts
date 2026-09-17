@@ -3,6 +3,7 @@ import { Prisma, InventoryTransactionType } from '@prisma/client'
 import { requireRole } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
+import { parseUpperBoundDate } from '@/lib/date-range'
 
 const TRANSACTION_TYPES = Object.values(InventoryTransactionType)
 
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const where: Prisma.InventoryTransactionWhereInput = { inventoryItemId: id, type }
     if (from || to) {
-      where.createdAt = { gte: from ? new Date(from) : undefined, lte: to ? new Date(to) : undefined }
+      where.createdAt = { gte: from ? new Date(from) : undefined, lte: to ? parseUpperBoundDate(to) : undefined }
     }
 
     const transactions = await prisma.inventoryTransaction.findMany({

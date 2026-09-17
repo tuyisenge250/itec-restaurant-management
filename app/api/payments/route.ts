@@ -24,8 +24,6 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
       include: {
         recordedBy: { select: { name: true } },
-        refunds: { include: { recordedBy: { select: { name: true } } } },
-        refundRequests: { orderBy: { createdAt: 'desc' }, include: { reviewedBy: { select: { name: true } } } },
       },
       take: 100,
     })
