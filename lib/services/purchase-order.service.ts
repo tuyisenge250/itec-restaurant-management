@@ -127,6 +127,7 @@ export async function receiveGoodsForPurchaseOrder(params: {
     quantityReceived: number
     unitCost?: number
     costingMethod: 'fifo' | 'lifo'
+    expiresAt?: Date | null
   }[]
   recordedById: string
 }) {
@@ -165,6 +166,7 @@ export async function receiveGoodsForPurchaseOrder(params: {
         quantity: line.quantityReceived,
         unitCost,
         costingMethod: line.costingMethod,
+        expiresAt: line.expiresAt,
         referenceId: purchaseOrderId,
         recordedById,
       })

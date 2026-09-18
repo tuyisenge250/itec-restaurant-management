@@ -43,6 +43,9 @@ export const receivePurchaseOrderSchema = z.object({
         quantityReceived: z.number().positive(),
         unitCost: z.number().nonnegative().optional(),
         costingMethod: z.enum(['fifo', 'lifo']),
+        // Meaningful mainly for a finished_good received ready-to-sell (e.g.
+        // bottled drinks) or a perishable raw item — informational only.
+        expiresAt: z.coerce.date().optional(),
       })
     )
     .min(1),

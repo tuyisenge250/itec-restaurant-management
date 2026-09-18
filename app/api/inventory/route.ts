@@ -7,7 +7,7 @@ import { handleApiError } from '@/lib/api-error'
 const createInventoryItemSchema = z.object({
   name: z.string().min(1),
   unit: z.string().min(1),
-  itemType: z.enum(['raw', 'prepared']).default('raw'),
+  itemType: z.enum(['raw', 'prepared', 'finished_good']).default('raw'),
   reorderLevel: z.number().nonnegative().default(0),
 })
 

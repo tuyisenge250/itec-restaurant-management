@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
           categoryId: body.categoryId,
           price: body.price,
           preparationCost: body.preparationCost,
+          requiresPreparation: body.requiresPreparation,
           recipeItems: {
             create: body.recipe.map((r) => ({
               inventoryItemId: r.inventoryItemId,

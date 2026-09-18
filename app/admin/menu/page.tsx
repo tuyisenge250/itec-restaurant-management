@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useForm, useFieldArray } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Plus, UtensilsCrossed, Loader2, Trash2, Pencil, FolderPlus } from 'lucide-react'
+import { Plus, UtensilsCrossed, Loader2, Trash2, Pencil, FolderPlus, ChefHat, Zap } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
@@ -31,6 +31,7 @@ const itemSchema = z.object({
   categoryId: z.string().optional(),
   price: z.coerce.number().positive(),
   preparationCost: z.coerce.number().nonnegative(),
+  requiresPreparation: z.boolean(),
   recipe: z.array(z.object({
     inventoryItemId: z.string().min(1),
     quantity: z.coerce.number().positive(),
@@ -66,7 +67,7 @@ export default function MenuPage() {
 
   const { register, handleSubmit, reset, setValue, watch, control, formState: { errors } } = useForm<ItemFormValues>({
     resolver: zodResolver(itemSchema),
-    defaultValues: { preparationCost: 0, recipe: [{ inventoryItemId: '', quantity: 0 }] },
+    defaultValues: { preparationCost: 0, requiresPreparation: true, recipe: [{ inventoryItemId: '', quantity: 0 }] },
   })
   const { fields, append, remove } = useFieldArray({ control, name: 'recipe' })
   const categoryId = watch('categoryId')
@@ -75,7 +76,7 @@ export default function MenuPage() {
 
   function openCreate() {
     setEditingItem(null)
-    reset({ name: '', categoryId: undefined, price: 0, preparationCost: 0, recipe: [{ inventoryItemId: '', quantity: 0 }] })
+    reset({ name: '', categoryId: undefined, price: 0, preparationCost: 0, requiresPreparation: true, recipe: [{ inventoryItemId: '', quantity: 0 }] })
     setItemOpen(true)
   }
 
@@ -86,6 +87,7 @@ export default function MenuPage() {
       categoryId: item.categoryId ?? undefined,
       price: item.price,
       preparationCost: item.preparationCost,
+      requiresPreparation: item.requiresPreparation,
       recipe: item.recipeItems.map((r) => ({ inventoryItemId: r.inventoryItemId, quantity: r.quantity })),
     })
     setItemOpen(true)
@@ -95,7 +97,10 @@ export default function MenuPage() {
     if (editingItem) {
       await updateMutation.mutateAsync({
         id: editingItem.id,
-        data: { name: values.name, categoryId: values.categoryId ?? null, price: values.price, preparationCost: values.preparationCost },
+        data: {
+          name: values.name, categoryId: values.categoryId ?? null, price: values.price,
+          preparationCost: values.preparationCost, requiresPreparation: values.requiresPreparation,
+        },
       })
       await updateRecipeMutation.mutateAsync({ menuItemId: editingItem.id, data: { ingredients: values.recipe } })
     } else {
@@ -140,6 +145,11 @@ export default function MenuPage() {
                   <div className="flex flex-col gap-1">
                     <span className="font-medium text-foreground leading-tight">{item.name}</span>
                     <span className="text-xs text-muted-foreground">{item.category?.name ?? 'Uncategorized'}</span>
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      {item.requiresPreparation
+                        ? <><ChefHat className="h-3 w-3" />Kitchen</>
+                        : <><Zap className="h-3 w-3" />Direct serve</>}
+                    </span>
                   </div>
                   <Tooltip>
                     <TooltipTrigger
@@ -199,6 +209,20 @@ export default function MenuPage() {
               <Input type="number" step="0.01" placeholder="0.50" {...register('preparationCost')} />
               {errors.preparationCost && <p className="text-xs text-destructive">{errors.preparationCost.message}</p>}
             </div>
+            <label className="flex items-start gap-2.5 rounded-md border border-border p-3">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-border"
+                {...register('requiresPreparation')}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-sm font-medium text-foreground">Send to kitchen</span>
+                <span className="text-xs text-muted-foreground">
+                  On: goes through a kitchen ticket before it can be served (a cooked dish). Off: served
+                  immediately by the waiter with no kitchen step (a Coke, bottled water, pre-made dessert).
+                </span>
+              </span>
+            </label>
             <div className="flex flex-col gap-2">
               <Label>Recipe ingredients</Label>
               {fields.map((field, i) => (

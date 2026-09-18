@@ -59,7 +59,7 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: string | null; onClo
   const [cancelOpen, setCancelOpen] = useState(false)
 
   const { preparedByNames, sentToKitchenAt, readyAt, kitchenDurationMs, inProgressMs } =
-    computeKitchenInfo(order, auditData?.auditLog)
+    computeKitchenInfo(order)
 
   function handleCancel() {
     if (!orderId) return

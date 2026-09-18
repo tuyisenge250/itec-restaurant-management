@@ -1,45 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import { NotFoundError } from '@/lib/errors'
-
-type LotRow = { quantityRemaining: number; unitCost: number }
-
-/**
- * Read-only simulation of the LIFO-then-FIFO draw for one unit of an
- * ingredient, WITHOUT locking or mutating anything — this is for display
- * (margin/menu pricing) so it must reflect the lots that would actually be
- * drawn on fulfillment, not an averaged or arbitrary lot price.
- */
-async function simulateNextCost(inventoryItemId: string, quantity: number): Promise<number> {
-  const [lifoLots, fifoLots] = await Promise.all([
-    prisma.inventoryLot.findMany({
-      where: { inventoryItemId, costingMethod: 'lifo', quantityRemaining: { gt: 0 } },
-      orderBy: { receivedAt: 'desc' },
-      select: { quantityRemaining: true, unitCost: true },
-    }),
-    prisma.inventoryLot.findMany({
-      where: { inventoryItemId, costingMethod: 'fifo', quantityRemaining: { gt: 0 } },
-      orderBy: { receivedAt: 'asc' },
-      select: { quantityRemaining: true, unitCost: true },
-    }),
-  ])
-
-  const candidates: LotRow[] = [...lifoLots, ...fifoLots]
-  let remaining = quantity
-  let cost = 0
-  for (const lot of candidates) {
-    if (remaining <= 0) break
-    const take = Math.min(lot.quantityRemaining, remaining)
-    cost += take * lot.unitCost
-    remaining -= take
-  }
-  // If stock is short of `quantity`, price the shortfall at the last known
-  // lot cost (or 0 with no lots at all) — this is a display estimate only,
-  // fulfillment itself will reject if stock is actually insufficient.
-  if (remaining > 0 && candidates.length > 0) {
-    cost += remaining * candidates[candidates.length - 1].unitCost
-  }
-  return cost
-}
+import { simulateDrawCost as simulateNextCost } from './inventory.service'
 
 /**
  * Cost to make one unit of a menu item RIGHT NOW: the ingredient cost is

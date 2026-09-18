@@ -26,18 +26,19 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  purchaseOrdersCreated  PurchaseOrder[]        @relation("POCreatedBy")
-  purchaseOrdersApproved PurchaseOrder[]        @relation("POApprovedBy")
-  goodsReceipts          GoodsReceipt[]         @relation("ReceivedByUser")
-  inventoryTransactions  InventoryTransaction[] @relation("RecordedByUser")
-  prepProductionRuns     PrepProductionRun[]    @relation("PrepRecordedByUser")
-  orders                 Order[]                @relation("CreatedByWaiter")
-  ordersStarted          Order[]                @relation("OrderStartedBy")
-  preparedOrderItems     OrderItem[]            @relation("PreparedByKitchen")
-  voidedOrderItems       OrderItem[]            @relation("VoidedByUser")
-  payments               Payment[]              @relation("RecordedByUser")
-  expensesRecorded       Expense[]              @relation("ExpenseRecordedBy")
-  auditLogs              AuditLog[]
+  purchaseOrdersCreated   PurchaseOrder[]        @relation("POCreatedBy")
+  purchaseOrdersApproved  PurchaseOrder[]        @relation("POApprovedBy")
+  goodsReceipts           GoodsReceipt[]         @relation("ReceivedByUser")
+  inventoryTransactions   InventoryTransaction[] @relation("RecordedByUser")
+  prepProductionRuns      PrepProductionRun[]    @relation("PrepRecordedByUser")
+  productionOrdersCreated PrepProductionOrder[]  @relation("ProductionOrderCreatedBy")
+  orders                  Order[]                @relation("CreatedByWaiter")
+  ordersStarted           Order[]                @relation("OrderStartedBy")
+  preparedOrderItems      OrderItem[]            @relation("PreparedByKitchen")
+  voidedOrderItems        OrderItem[]            @relation("VoidedByUser")
+  payments                Payment[]              @relation("RecordedByUser")
+  expensesRecorded        Expense[]              @relation("ExpenseRecordedBy")
+  auditLogs               AuditLog[]
 
   @@map("users")
 }
@@ -150,7 +151,8 @@ model GoodsReceiptLine {
 
 enum InventoryItemType {
   raw // purchased directly from suppliers
-  prepared // produced in-house via a PrepRecipe (sub-recipe / prepared item)
+  prepared // intermediate — only ever consumed as an ingredient in another recipe (via PrepRecipeItem), never sold directly
+  finished_good // ready to sell/serve as-is — sits in stock waiting for an order, referenced by a MenuItem's RecipeItem (e.g. a cooked batch, a bottled drink)
 }
 
 model InventoryItem {
@@ -170,8 +172,8 @@ model InventoryItem {
   recipeItems           RecipeItem[] // used as an ingredient in a MenuItem BOM
 
   // Sub-recipe / two-level BOM support:
-  prepRecipe       PrepRecipe?      @relation("PrepRecipeOutput") // if itemType = prepared, this is how it's made
-  prepRecipeInputs PrepRecipeItem[] // if this item is used as a raw input to *other* prepared items
+  prepRecipe       PrepRecipe?      @relation("PrepRecipeOutput") // if itemType = prepared or finished_good, this is how it's made (both are produced via a PrepProductionRun)
+  prepRecipeInputs PrepRecipeItem[] // if this item is used as a raw input to *other* prepared/finished_good items
 
   @@map("inventory_items")
 }
@@ -194,6 +196,7 @@ model InventoryLot {
   quantityReceived  Float
   quantityRemaining Float // decremented as this lot is consumed/wasted/adjusted
   receivedAt        DateTime      @default(now())
+  expiresAt         DateTime? // meaningful mainly for finished_good lots (a cooked batch held warm/prepped ahead) — null for most raw/prepared lots. Informational only: no automated enforcement, surfaced in the UI, waste logging is the manual remedy when something expires unsold.
   notes             String?
 
   goodsReceiptLine      GoodsReceiptLine?
@@ -257,8 +260,9 @@ model PrepRecipe {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  inputs         PrepRecipeItem[]
-  productionRuns PrepProductionRun[]
+  inputs           PrepRecipeItem[]
+  productionRuns   PrepProductionRun[]
+  productionOrders PrepProductionOrder[]
 
   @@map("prep_recipes")
 }
@@ -275,18 +279,79 @@ model PrepRecipeItem {
   @@map("prep_recipe_items")
 }
 
-// A single production event: consumes input lots (per FIFO/LIFO rule), produces one output lot.
+enum ProductionSource {
+  internal // made in-house — ingredients are deducted at fulfillment, scaled to the actual quantity produced
+  outside // outsourced to a third party who does the labor — WE still supply the ingredients (deducted the
+  // moment the order is placed, scaled to the target quantity, since that's when they physically leave
+  // our stock); the lot's final cost is that ingredient cost plus the third party's service fee
+}
+
+enum ProductionOrderStatus {
+  pending
+  fulfilled
+  cancelled
+}
+
+// A planned production request: admin orders a target quantity of a recipe's
+// output and, for an internal order, assigns it to kitchen or waiter — the
+// same "who does this" choice a menu item's requiresPreparation makes, just
+// for production instead of serving a customer. An internal order sits in
+// its assignee's queue until they (or admin) actually run the batch; an
+// outside order deducts its ingredients immediately (see ProductionSource)
+// and then sits until admin records the third party's delivery. Either way,
+// fulfilling it creates the PrepProductionRun that produces the output lot
+// — this model is a planning/routing layer on top of that, not a
+// replacement for it; an ad-hoc production run (no order) is still fully
+// supported.
+model PrepProductionOrder {
+  id                     String                @id @default(cuid())
+  prepRecipeId           String
+  prepRecipe             PrepRecipe            @relation(fields: [prepRecipeId], references: [id])
+  targetQuantity         Float // drives the ingredient quantities — always scaled from this, never a fixed recipe batch size
+  source                 ProductionSource // decided at order creation; the run that fulfills it must match
+  // Who this internal order is assigned to execute it — kitchen or waiter. Always null for an outside
+  // order (there's no in-house assignee; admin is the one who receives it).
+  assignedRole           Role?
+  // The ingredient cost already deducted at creation, for an outside order only — locked in then because
+  // that's when the ingredients actually left the building. Read back at receiving to compute final unit
+  // cost (this + the service fee paid). Always null for an internal order (nothing is deducted until
+  // fulfillment, using whatever quantity is actually produced then).
+  reservedIngredientCost Float?
+  status                 ProductionOrderStatus @default(pending)
+  notes                  String?
+  createdById            String
+  createdBy              User                  @relation("ProductionOrderCreatedBy", fields: [createdById], references: [id])
+  createdAt              DateTime              @default(now())
+
+  fulfillment PrepProductionRun? @relation("ProductionOrderFulfillment")
+
+  @@map("prep_production_orders")
+}
+
+// A single production event: consumes input lots (per FIFO/LIFO rule) for an internal run, produces one output lot.
 model PrepProductionRun {
-  id               String       @id @default(cuid())
-  prepRecipeId     String
-  prepRecipe       PrepRecipe   @relation(fields: [prepRecipeId], references: [id])
-  quantityProduced Float
-  laborCost        Float        @default(0) // optional manual prep-labor cost folded into output lot's unitCost
-  producedLotId    String       @unique
-  producedLot      InventoryLot @relation("ProducedLot", fields: [producedLotId], references: [id])
-  recordedById     String
-  recordedBy       User         @relation("PrepRecordedByUser", fields: [recordedById], references: [id])
-  createdAt        DateTime     @default(now())
+  id                String               @id @default(cuid())
+  prepRecipeId      String
+  prepRecipe        PrepRecipe           @relation(fields: [prepRecipeId], references: [id])
+  quantityProduced  Float
+  source            ProductionSource     @default(internal)
+  // Recorded for reference on an internal run, but deliberately NOT folded into the produced lot's
+  // unitCost/COGS (see producePrepRecipe) — labor is tracked as a period Expense instead. Folding both in
+  // would double-count labor once it's also logged as a "Salaries"-type expense. If/when expense-tracking
+  // work touches labor costing, confirm with the team before changing this. Always 0 for an outside run.
+  laborCost         Float                @default(0)
+  // Total amount paid to the third party for the whole batch — only set when source = outside. Unlike
+  // laborCost, this IS folded into the produced lot's unitCost, since it's the only real cost basis: no
+  // ingredients of yours were consumed, so there's nothing else to price the lot from.
+  outsideCost       Float?
+  // Set only when this run fulfills a PrepProductionOrder — null for an ad-hoc run started without one.
+  productionOrderId String?              @unique
+  productionOrder   PrepProductionOrder? @relation("ProductionOrderFulfillment", fields: [productionOrderId], references: [id])
+  producedLotId     String               @unique
+  producedLot       InventoryLot         @relation("ProducedLot", fields: [producedLotId], references: [id])
+  recordedById      String
+  recordedBy        User                 @relation("PrepRecordedByUser", fields: [recordedById], references: [id])
+  createdAt         DateTime             @default(now())
 
   @@map("prep_production_runs")
 }
@@ -305,15 +370,16 @@ model MenuCategory {
 }
 
 model MenuItem {
-  id              String        @id @default(cuid())
-  name            String
-  categoryId      String?
-  category        MenuCategory? @relation(fields: [categoryId], references: [id])
-  price           Float
-  preparationCost Float         @default(0) // per-dish prep cost component, separate from raw ingredient cost
-  isAvailable     Boolean       @default(true) // auto-disabled by app logic when a required ingredient is out of stock
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id                  String        @id @default(cuid())
+  name                String
+  categoryId          String?
+  category            MenuCategory? @relation(fields: [categoryId], references: [id])
+  price               Float
+  preparationCost     Float         @default(0) // per-dish prep cost component, separate from raw ingredient cost
+  isAvailable         Boolean       @default(true) // auto-disabled by app logic when a required ingredient is out of stock
+  requiresPreparation Boolean       @default(true) // false = direct-serve: no kitchen ticket, served immediately by the waiter (e.g. a Coke, bottled water)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   recipeItems RecipeItem[]
   orderItems  OrderItem[]
@@ -339,6 +405,8 @@ model RecipeItem {
 // ORDERS (Waiter / Kitchen)
 // ─────────────────────────────────────────────
 
+// Order.status is derived from these (see computeOrderStatus in order.service.ts)
+// rather than written independently, so the two can never drift apart.
 enum OrderStatus {
   pending // waiter can still add/edit/remove items
   preparing // sent to kitchen — item edits locked for waiter; kitchen can still void an item
@@ -346,6 +414,14 @@ enum OrderStatus {
   served
   paid
   cancelled
+}
+
+enum OrderItemStatus {
+  pending
+  preparing // kitchen-prepared items only
+  ready // kitchen-prepared items only
+  served
+  voided
 }
 
 model Order {
@@ -369,9 +445,11 @@ model Order {
   discountAmount  Float?
   discountReason  String?
 
-  // Set the moment a kitchen user (or admin) claims this order off the
-  // pending queue — from then on only that person (or admin) can advance it
-  // further; other kitchen staff can see it but not act on it.
+  // Set the moment a kitchen user (or admin) claims this order's pending
+  // kitchen-bound (requiresPreparation) items off the queue — from then on
+  // only that person (or admin) can advance those items further; other
+  // kitchen staff can see it but not act on it. Direct-serve items are never
+  // part of this claim — they were never the kitchen's to claim.
   startedById String?
   startedBy   User?     @relation("OrderStartedBy", fields: [startedById], references: [id])
   startedAt   DateTime?
@@ -396,7 +474,17 @@ model OrderItem {
   priceAtSale Float // menu price snapshot at time of order
   costAtSale  Float // recipe cost snapshot (ingredient cost from actual lots + prep cost) — for per-order COGS
 
-  // Kitchen fulfillment / chef activity tracking
+  // Snapshot of MenuItem.requiresPreparation at the time this line was added
+  // — the menu can change later without retroactively changing this line.
+  requiresPreparation Boolean         @default(true)
+  status              OrderItemStatus @default(pending)
+  // Set the moment a prep item is claimed off the kitchen queue (see
+  // Order.startedById) — always null for direct-serve items, since they
+  // never enter the kitchen queue at all.
+  sentToKitchenAt     DateTime?
+
+  // Kitchen fulfillment / chef activity tracking (prep items only — set when
+  // a prep item is marked ready, i.e. when its stock is actually consumed)
   preparedById String?
   preparedBy   User?     @relation("PreparedByKitchen", fields: [preparedById], references: [id])
   preparedAt   DateTime?

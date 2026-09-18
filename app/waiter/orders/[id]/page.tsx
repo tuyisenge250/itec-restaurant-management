@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, CreditCard, Plus, Minus, X, Split, Merge, Percent, Ban } from 'lucide-react'
+import { ArrowLeft, CreditCard, Plus, Minus, X, Split, Merge, Percent, Ban, ChefHat, Zap, Check, Undo2 } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { Button } from '@/components/ui/button'
@@ -19,27 +19,41 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel,
 } from '@/components/ui/alert-dialog'
 import {
-  useOrder, useOrders, useOrderAuditLog, useUpdateOrderItems,
-  useSplitOrder, useMergeOrder, useApplyOrderDiscount, useUpdateOrderStatus,
+  useOrder, useOrders, useUpdateOrderItems,
+  useSplitOrder, useMergeOrder, useApplyOrderDiscount, useUpdateOrderStatus, useServeOrderItem, useVoidOrderItem,
+  type Order,
 } from '@/lib/api/orders'
+import { Textarea } from '@/components/ui/textarea'
 import { useMenu } from '@/lib/api/menu'
 import { useCurrentUser } from '@/lib/api/auth'
 import { DISCOUNT_CAPS } from '@/lib/rbac'
 import { computeKitchenInfo, formatDuration } from '@/lib/kitchen-timing'
 import { rwf } from '@/lib/utils'
 
-// There's no per-item status field — this derives pending/preparing/ready
-// from the order's own status plus whether this item's stock has actually
-// been drawn (preparedAt is set exactly at the order's ready transition).
-function itemKitchenStatus(orderStatus: string, item: { preparedAt: string | null }): 'pending' | 'preparing' | 'ready' {
-  if (orderStatus === 'pending') return 'pending'
-  return item.preparedAt ? 'ready' : 'preparing'
+// A prep item locks once it's been sent to the kitchen; a direct-serve item
+// locks once it's been served — either way it can no longer be edited or
+// removed from the waiter side, only voided (kitchen) or reversed (waiter).
+function isItemLocked(item: Order['items'][number]) {
+  return item.requiresPreparation ? item.sentToKitchenAt !== null : item.status === 'served'
+}
+
+// A direct-serve item is servable the moment it's added; a prep item only
+// once the kitchen has marked it ready.
+function isItemServable(item: Order['items'][number]) {
+  return item.requiresPreparation ? item.status === 'ready' : item.status === 'pending'
+}
+
+// Stock was drawn the moment a direct-serve item was served, so reversing it
+// after the fact (wrong order, customer changed their mind) is a waiter
+// action here — a required reason, immediate reversal, no cap/approval
+// queue. A prep item already served is still kitchen/admin's to void.
+function isWaiterVoidable(item: Order['items'][number]) {
+  return !item.requiresPreparation && item.status === 'served'
 }
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: order, isLoading } = useOrder(id)
-  const { data: auditData } = useOrderAuditLog(id)
   const { data: menuItems = [] } = useMenu()
   const { data: allOrders = [] } = useOrders()
   const { data: me } = useCurrentUser()
@@ -49,6 +63,8 @@ export default function OrderDetailPage() {
   const mergeOrder = useMergeOrder()
   const applyDiscount = useApplyOrderDiscount()
   const updateStatus = useUpdateOrderStatus()
+  const serveItem = useServeOrderItem()
+  const voidItem = useVoidOrderItem()
 
   const [addMenuItemId, setAddMenuItemId] = useState('')
   const [splitOpen, setSplitOpen] = useState(false)
@@ -59,6 +75,8 @@ export default function OrderDetailPage() {
   const [discountPercent, setDiscountPercent] = useState('')
   const [discountReason, setDiscountReason] = useState('')
   const [cancelOpen, setCancelOpen] = useState(false)
+  const [voidTarget, setVoidTarget] = useState<{ orderItemId: string; name: string } | null>(null)
+  const [voidReason, setVoidReason] = useState('')
 
   if (isLoading) return (
     <div className="flex flex-col gap-4">
@@ -72,8 +90,9 @@ export default function OrderDetailPage() {
   const activeItems = order.items.filter((i) => !i.isVoided)
   const total = activeItems.reduce((s, i) => s + i.priceAtSale * i.quantity, 0)
   const isPending = order.status === 'pending'
+  const hasPrepItems = order.items.some((i) => i.requiresPreparation)
   const cap = me ? DISCOUNT_CAPS[me.role] : 0
-  const { preparedByNames, sentToKitchenAt, kitchenDurationMs, inProgressMs } = computeKitchenInfo(order, auditData?.auditLog)
+  const { preparedByNames, sentToKitchenAt, kitchenDurationMs, inProgressMs } = computeKitchenInfo(order)
 
   const eligibleMergeTargets = allOrders.filter(
     (o) => o.id !== order.id && o.table === order.table && !['paid', 'cancelled'].includes(o.status)
@@ -142,6 +161,14 @@ export default function OrderDetailPage() {
     setCancelOpen(false)
   }
 
+  function confirmVoid() {
+    if (!voidTarget || !voidReason.trim()) return
+    voidItem.mutate(
+      { orderItemId: voidTarget.orderItemId, data: { voidReason } },
+      { onSuccess: () => { setVoidTarget(null); setVoidReason('') } }
+    )
+  }
+
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6">
       <div className="flex items-center gap-3">
@@ -160,12 +187,18 @@ export default function OrderDetailPage() {
           <StatusBadge status={order.status} />
         </CardHeader>
         <CardContent className="flex flex-col gap-2 pb-4">
-          {order.items.map((item) => (
+          {order.items.map((item) => {
+            const locked = item.isVoided || isItemLocked(item)
+            const servable = !item.isVoided && isItemServable(item)
+            return (
             <div key={item.id} className="flex flex-col gap-1">
               <div className={`flex items-center justify-between text-sm ${item.isVoided ? 'text-muted-foreground line-through' : ''}`}>
                 <span className="flex items-center gap-2">
+                  {item.requiresPreparation
+                    ? <ChefHat className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    : <Zap className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                   {item.menuItem.name}
-                  {isPending ? (
+                  {!locked ? (
                     <span className="flex items-center gap-1">
                       <button
                         onClick={() => handleChangeQty(item, -1)}
@@ -186,11 +219,30 @@ export default function OrderDetailPage() {
                   ) : (
                     <span className="text-muted-foreground">×{item.quantity}</span>
                   )}
-                  {!item.isVoided && <StatusBadge status={itemKitchenStatus(order.status, item)} />}
+                  {!item.isVoided && <StatusBadge status={item.status} />}
                 </span>
                 <div className="flex items-center gap-2">
                   <span>{rwf(item.priceAtSale * item.quantity)}</span>
-                  {isPending && !item.isVoided && (
+                  {servable && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={serveItem.isPending}
+                      onClick={() => serveItem.mutate(item.id)}
+                    >
+                      <Check className="mr-1 h-3.5 w-3.5" />Serve
+                    </Button>
+                  )}
+                  {isWaiterVoidable(item) && (
+                    <button
+                      onClick={() => setVoidTarget({ orderItemId: item.id, name: item.menuItem.name })}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label="Void item"
+                    >
+                      <Undo2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  {!locked && !item.isVoided && (
                     <button onClick={() => handleRemoveItem(item.id)} className="text-muted-foreground hover:text-destructive">
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -199,14 +251,15 @@ export default function OrderDetailPage() {
               </div>
               {item.isVoided && (
                 <p className="text-xs text-destructive">
-                  Voided by kitchen{item.voidReason ? ` — ${item.voidReason}` : ''}
+                  Voided{item.voidReason ? ` — ${item.voidReason}` : ''}
                   {item.voidedAt ? ` · ${new Date(item.voidedAt).toLocaleString()}` : ''}
                 </p>
               )}
             </div>
-          ))}
+            )
+          })}
 
-          {isPending ? (
+          {order.status !== 'paid' && order.status !== 'cancelled' && (
             <div className="mt-2 flex gap-2">
               <Select value={addMenuItemId || null} onValueChange={(v) => setAddMenuItemId(v ?? '')}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Add another item" /></SelectTrigger>
@@ -220,10 +273,6 @@ export default function OrderDetailPage() {
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
-          ) : (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Kitchen has started this order — ask kitchen to void an item if it needs to change.
-            </p>
           )}
 
           <Separator className="my-1" />
@@ -240,7 +289,7 @@ export default function OrderDetailPage() {
         </CardContent>
       </Card>
 
-      {!isPending && order.status !== 'paid' && order.status !== 'cancelled' && (
+      {hasPrepItems && sentToKitchenAt && order.status !== 'paid' && order.status !== 'cancelled' && (
         <Card>
           <CardHeader className="pb-3"><CardTitle className="text-base">Kitchen</CardTitle></CardHeader>
           <CardContent className="flex flex-col gap-1.5 pb-4 text-sm">
@@ -266,9 +315,9 @@ export default function OrderDetailPage() {
         </Card>
       )}
 
-      {isPending && (
+      {hasPrepItems && !sentToKitchenAt && order.status !== 'cancelled' && (
         <p className="rounded-md border border-dashed border-border p-3 text-center text-sm text-muted-foreground">
-          Waiting for kitchen to start this order — you can keep editing it until then.
+          Waiting for kitchen to start the kitchen items on this order — you can keep editing it until then.
         </p>
       )}
 
@@ -306,6 +355,29 @@ export default function OrderDetailPage() {
             <AlertDialogCancel>Keep order</AlertDialogCancel>
             <Button variant="destructive" disabled={updateStatus.isPending} onClick={handleCancel}>
               Cancel order
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!voidTarget} onOpenChange={(o) => { if (!o) { setVoidTarget(null); setVoidReason('') } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Void {voidTarget?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This item was already served and its stock deducted — voiding it credits that stock back
+              immediately. A reason is required.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Textarea
+            placeholder="Reason (e.g. wrong order, customer changed their mind)"
+            value={voidReason}
+            onChange={(e) => setVoidReason(e.target.value)}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button variant="destructive" disabled={!voidReason.trim() || voidItem.isPending} onClick={confirmVoid}>
+              Void item
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

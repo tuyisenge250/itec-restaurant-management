@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Clock, ChefHat, AlertTriangle, Ban, Info, Boxes } from 'lucide-react'
+import { Clock, ChefHat, AlertTriangle, Ban, Info, Boxes, CheckCircle2 } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -21,7 +21,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel,
 } from '@/components/ui/alert-dialog'
 import {
-  useOrders, useOrderAuditLog, useUpdateOrderStatus, useVoidOrderItem, type Order, type OrderStatusTarget,
+  useOrders, useUpdateOrderStatus, useVoidOrderItem, useMarkOrderItemReady, type Order,
 } from '@/lib/api/orders'
 import { useCurrentUser } from '@/lib/api/auth'
 import { useMenu } from '@/lib/api/menu'
@@ -33,10 +33,14 @@ import { rwf } from '@/lib/utils'
 
 type ColStatus = 'pending' | 'preparing' | 'ready'
 
-const columns: { status: ColStatus; label: string; next: OrderStatusTarget; nextLabel: string; color: string }[] = [
-  { status: 'pending',   label: 'Pending',   next: 'preparing', nextLabel: 'Start preparing', color: 'bg-muted text-muted-foreground' },
-  { status: 'preparing', label: 'Preparing', next: 'ready',     nextLabel: 'Mark ready',       color: 'bg-warning text-warning-foreground' },
-  { status: 'ready',     label: 'Ready',     next: 'served',    nextLabel: 'Mark served',      color: 'bg-success text-success-foreground' },
+// Only the 'pending' column has an order-level action (claiming the order
+// starts every one of its pending kitchen items at once). 'preparing' and
+// 'ready' cards act per item instead, since a mixed order's dishes finish
+// independently.
+const columns: { status: ColStatus; label: string; color: string }[] = [
+  { status: 'pending',   label: 'Pending',   color: 'bg-muted text-muted-foreground' },
+  { status: 'preparing', label: 'Preparing', color: 'bg-warning text-warning-foreground' },
+  { status: 'ready',     label: 'Ready',     color: 'bg-success text-success-foreground' },
 ]
 
 function minutesAgo(iso: string) {
@@ -100,9 +104,8 @@ function OrderItemProcedure({ item, menuInfo }: {
 
 function OrderDetailDialog({ order, onClose }: { order: Order | null; onClose: () => void }) {
   const { data: menuItems = [] } = useMenu()
-  const { data: auditData } = useOrderAuditLog(order?.id)
   const menuById = new Map(menuItems.map((m) => [m.id, { price: m.price, categoryName: m.category?.name ?? 'Uncategorized' }]))
-  const { preparedByNames, sentToKitchenAt, kitchenDurationMs, inProgressMs } = computeKitchenInfo(order ?? undefined, auditData?.auditLog)
+  const { preparedByNames, sentToKitchenAt, kitchenDurationMs, inProgressMs } = computeKitchenInfo(order ?? undefined)
 
   return (
     <Dialog open={!!order} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -146,12 +149,13 @@ function OrderDetailDialog({ order, onClose }: { order: Order | null; onClose: (
 }
 
 export default function KitchenOrdersPage() {
-  const { data: orders = [], isLoading } = useOrders({ refetchInterval: 5000 })
+  const { data: orders = [], isLoading } = useOrders({ refetchInterval: 5000, filters: { view: 'kitchen' } })
   const { data: me } = useCurrentUser()
   const updateStatus = useUpdateOrderStatus()
+  const markReady = useMarkOrderItemReady()
   const voidItem = useVoidOrderItem()
 
-  const [stockError, setStockError] = useState<{ orderId: string; message: string } | null>(null)
+  const [stockError, setStockError] = useState<{ orderItemId: string; message: string } | null>(null)
   const [voidTarget, setVoidTarget] = useState<{ orderItemId: string; name: string } | null>(null)
   const [voidReason, setVoidReason] = useState('')
   const [detailOrder, setDetailOrder] = useState<Order | null>(null)
@@ -163,18 +167,19 @@ export default function KitchenOrdersPage() {
     inventory.filter((i) => i.currentStock <= i.reorderLevel).map((i) => i.id)
   )
 
-  function advance(orderId: string, next: OrderStatusTarget) {
+  function startOrder(orderId: string) {
+    updateStatus.mutate({ id: orderId, status: 'preparing' })
+  }
+
+  function markItemReady(orderItemId: string) {
     setStockError(null)
-    updateStatus.mutate(
-      { id: orderId, status: next },
-      {
-        onError: (err) => {
-          if (err instanceof ApiError && err.code === 'INSUFFICIENT_STOCK') {
-            setStockError({ orderId, message: err.message })
-          }
-        },
-      }
-    )
+    markReady.mutate(orderItemId, {
+      onError: (err) => {
+        if (err instanceof ApiError && err.code === 'INSUFFICIENT_STOCK') {
+          setStockError({ orderItemId, message: err.message })
+        }
+      },
+    })
   }
 
   function confirmVoid() {
@@ -223,8 +228,10 @@ export default function KitchenOrdersPage() {
                         // Once someone has claimed this order (started it),
                         // only they or an admin can act on it further —
                         // other kitchen users can see it but the board
-                        // disables their controls.
+                        // disables their controls. Items shown here are
+                        // already scoped to kitchen (prep) items only.
                         const claimedByOther = !!order.startedById && order.startedById !== me?.id
+                        const orderHasStockError = order.items.some((i) => i.id === stockError?.orderItemId)
                         return (
                         <Card key={order.id}>
                           <CardHeader className="flex flex-row items-center justify-between pb-2 pt-4 px-4">
@@ -248,19 +255,33 @@ export default function KitchenOrdersPage() {
                             </div>
                           </CardHeader>
                           <CardContent className="px-4 pb-4">
-                            {stockError?.orderId === order.id && (
+                            {orderHasStockError && (
                               <Alert variant="destructive" className="mb-3">
                                 <AlertTriangle />
-                                <AlertDescription>Can&apos;t fulfill: {stockError.message}</AlertDescription>
+                                <AlertDescription>Can&apos;t fulfill: {stockError?.message}</AlertDescription>
                               </Alert>
                             )}
-                            <ul className="mb-3 flex flex-col gap-1">
+                            <ul className="mb-3 flex flex-col gap-2">
                               {order.items.map((item) => (
                                 <li key={item.id} className={`flex items-center justify-between text-sm ${item.isVoided ? 'text-muted-foreground line-through' : ''}`}>
-                                  <span>{item.menuItem.name}</span>
+                                  <span>{item.menuItem.name} <span className="font-medium">×{item.quantity}</span></span>
                                   <div className="flex items-center gap-2">
-                                    <span className="font-medium">×{item.quantity}</span>
-                                    {!item.isVoided && col.status !== 'pending' && !claimedByOther && (
+                                    {!item.isVoided && item.status === 'preparing' && (
+                                      <Button
+                                        size="sm"
+                                        disabled={markReady.isPending || claimedByOther}
+                                        onClick={() => markItemReady(item.id)}
+                                      >
+                                        Mark ready
+                                      </Button>
+                                    )}
+                                    {!item.isVoided && (item.status === 'ready' || item.status === 'served') && (
+                                      <span className="flex items-center gap-1 text-xs text-success">
+                                        <CheckCircle2 className="h-3.5 w-3.5" />
+                                        {item.status === 'served' ? 'Served' : 'Ready'}
+                                      </span>
+                                    )}
+                                    {!item.isVoided && item.status !== 'pending' && item.status !== 'served' && !claimedByOther && (
                                       <button
                                         onClick={() => setVoidTarget({ orderItemId: item.id, name: item.menuItem.name })}
                                         className="text-muted-foreground hover:text-destructive"
@@ -273,14 +294,16 @@ export default function KitchenOrdersPage() {
                                 </li>
                               ))}
                             </ul>
-                            <Button
-                              size="sm"
-                              className="w-full"
-                              disabled={updateStatus.isPending || claimedByOther}
-                              onClick={() => advance(order.id, col.next)}
-                            >
-                              {claimedByOther ? `Being handled by ${order.startedBy?.name}` : col.nextLabel}
-                            </Button>
+                            {col.status === 'pending' && (
+                              <Button
+                                size="sm"
+                                className="w-full"
+                                disabled={updateStatus.isPending || claimedByOther}
+                                onClick={() => startOrder(order.id)}
+                              >
+                                {claimedByOther ? `Being handled by ${order.startedBy?.name}` : 'Start preparing'}
+                              </Button>
+                            )}
                           </CardContent>
                         </Card>
                         )

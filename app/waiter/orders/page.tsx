@@ -16,7 +16,8 @@ import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel,
 } from '@/components/ui/alert-dialog'
-import { useOrders, useOrderAuditLog, useUpdateOrderStatus, type Order } from '@/lib/api/orders'
+import { useOrders, useUpdateOrderStatus, type Order } from '@/lib/api/orders'
+import { ProductionOrdersQueue } from '@/components/production-orders-queue'
 import { computeKitchenInfo, formatDuration } from '@/lib/kitchen-timing'
 import { rwf } from '@/lib/utils'
 
@@ -25,8 +26,7 @@ function minutesAgo(iso: string) {
 }
 
 function OrderProgressDialog({ order, onClose }: { order: Order | null; onClose: () => void }) {
-  const { data: auditData } = useOrderAuditLog(order?.id)
-  const { preparedByNames, sentToKitchenAt, kitchenDurationMs, inProgressMs } = computeKitchenInfo(order ?? undefined, auditData?.auditLog)
+  const { preparedByNames, sentToKitchenAt, kitchenDurationMs, inProgressMs } = computeKitchenInfo(order ?? undefined)
 
   return (
     <Dialog open={!!order} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -101,6 +101,7 @@ export default function WaiterOrdersPage() {
           </div>
         }
       />
+      <ProductionOrdersQueue assignedRole="waiter" />
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -146,15 +147,6 @@ export default function WaiterOrdersPage() {
                           {!['pending', 'paid', 'cancelled'].includes(o.status) && (
                             <Button size="sm" variant="ghost" onClick={() => setProgressOrder(o)}>
                               <Info className="mr-1 h-3.5 w-3.5" />Progress
-                            </Button>
-                          )}
-                          {o.status === 'ready' && (
-                            <Button
-                              size="sm" variant="outline"
-                              disabled={updateStatus.isPending}
-                              onClick={() => updateStatus.mutate({ id: o.id, status: 'served' })}
-                            >
-                              Mark served
                             </Button>
                           )}
                           {(o.status === 'ready' || o.status === 'served') && (

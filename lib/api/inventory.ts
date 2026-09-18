@@ -4,11 +4,12 @@ import { toast } from 'sonner'
 import type { z } from 'zod'
 import { logWasteSchema, adjustStockSchema, adjustLotPriceSchema } from '@/lib/validation/inventory.schema'
 
+export type InventoryItemType = 'raw' | 'prepared' | 'finished_good'
 export type InventoryItem = {
   id: string
   name: string
   unit: string
-  itemType: 'raw' | 'prepared'
+  itemType: InventoryItemType
   currentStock: number
   reorderLevel: number
   isActive: boolean
@@ -16,7 +17,7 @@ export type InventoryItem = {
   updatedAt: string
   stockValue: number
 }
-export type CreateInventoryInput = { name: string; unit: string; reorderLevel?: number }
+export type CreateInventoryInput = { name: string; unit: string; itemType?: InventoryItemType; reorderLevel?: number }
 export type LogWasteInput = z.infer<typeof logWasteSchema>
 export type AdjustStockInput = z.infer<typeof adjustStockSchema>
 export type AdjustLotPriceInput = z.infer<typeof adjustLotPriceSchema>
@@ -30,6 +31,7 @@ export type InventoryLot = {
   quantityReceived: number
   quantityRemaining: number
   receivedAt: string
+  expiresAt: string | null
   notes: string | null
 }
 export type InventoryTransactionReference =
@@ -50,7 +52,14 @@ export type InventoryTransactionReference =
       voidReason: string | null
     }
   | { kind: 'purchase_order'; purchaseOrderId: string; supplierName: string; status: string }
-  | { kind: 'prep_recipe'; prepRecipeId: string; outputItemName: string }
+  | {
+      kind: 'prep_recipe'
+      prepRecipeId: string
+      outputItemName: string
+      productionSource: 'internal' | 'outside' | null
+      laborCost: number | null
+      outsideCost: number | null
+    }
   | null
 
 export type InventoryTransaction = {

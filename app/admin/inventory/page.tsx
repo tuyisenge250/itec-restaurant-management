@@ -4,7 +4,7 @@ import { Fragment, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Boxes, Loader2, Plus, Pencil, Trash2, ChevronDown, ChevronRight, History, SlidersHorizontal, ChefHat } from 'lucide-react'
+import { Boxes, Loader2, Plus, Pencil, Trash2, ChevronDown, ChevronRight, History, SlidersHorizontal, ChefHat, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
@@ -24,16 +25,41 @@ import { Card, CardContent } from '@/components/ui/card'
 import {
   useInventory, useCreateInventoryItem, useUpdateInventoryItem, useDeleteInventoryItem,
   useInventoryLots, useInventoryTransactions, useAdjustStock, useAdjustLotPrice, useProducible,
-  type InventoryItem, type InventoryTransaction,
+  type InventoryItem, type InventoryItemType, type InventoryTransaction,
 } from '@/lib/api/inventory'
 import { rwf } from '@/lib/utils'
 
 const itemSchema = z.object({
   name: z.string().min(1),
   unit: z.string().min(1),
+  itemType: z.enum(['raw', 'prepared', 'finished_good']),
   reorderLevel: z.coerce.number().nonnegative(),
 })
 type ItemFormValues = z.infer<typeof itemSchema>
+
+const ITEM_TYPE_LABELS: Record<InventoryItemType, string> = {
+  raw: 'Raw material',
+  prepared: 'Prepared (ingredient only)',
+  finished_good: 'Finished good',
+}
+
+const ITEM_TYPE_TABS: { value: InventoryItemType | 'all'; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'raw', label: 'Raw materials' },
+  { value: 'prepared', label: 'Prepared items' },
+  { value: 'finished_good', label: 'Finished goods' },
+]
+
+// A lot is "expiring soon" if it has stock left and expires within the hour
+// — purely informational, no automated waste-off happens from this.
+function isExpiringSoon(expiresAt: string | null) {
+  if (!expiresAt) return false
+  const msLeft = new Date(expiresAt).getTime() - Date.now()
+  return msLeft > 0 && msLeft <= 60 * 60 * 1000
+}
+function isExpired(expiresAt: string | null) {
+  return !!expiresAt && new Date(expiresAt).getTime() <= Date.now()
+}
 
 const REASON_CODES = [
   { value: 'count_correction', label: 'Count correction' },
@@ -70,9 +96,20 @@ function TransactionDetail({ tx }: { tx: InventoryTransaction }) {
   }
   if (ref?.kind === 'prep_recipe') {
     return (
-      <div className="text-sm">
-        <span className="text-muted-foreground">Produced for</span>{' '}
-        <span className="font-medium">{ref.outputItemName}</span>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm sm:grid-cols-3">
+        <div><span className="text-muted-foreground">Produced for</span><div className="font-medium">{ref.outputItemName}</div></div>
+        {ref.productionSource && (
+          <div>
+            <span className="text-muted-foreground">Made</span>
+            <div className="font-medium">{ref.productionSource === 'outside' ? 'Outside (outsourced)' : 'In-house'}</div>
+          </div>
+        )}
+        {ref.productionSource === 'outside' && ref.outsideCost != null && (
+          <div><span className="text-muted-foreground">Cost paid</span><div className="font-medium">{rwf(ref.outsideCost)}</div></div>
+        )}
+        {ref.productionSource === 'internal' && !!ref.laborCost && (
+          <div><span className="text-muted-foreground">Labor cost</span><div className="font-medium">{rwf(ref.laborCost)}</div></div>
+        )}
       </div>
     )
   }
@@ -170,7 +207,7 @@ function LotsPanel({ item }: { item: InventoryItem }) {
 
   return (
     <TableRow>
-      <TableCell colSpan={7} className="bg-muted/30 p-4">
+      <TableCell colSpan={8} className="bg-muted/30 p-4">
         {isLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : (
@@ -190,6 +227,7 @@ function LotsPanel({ item }: { item: InventoryItem }) {
                     <TableHead className="text-right">Unit cost</TableHead>
                     <TableHead>Supplier</TableHead>
                     <TableHead>Received</TableHead>
+                    <TableHead>Expires</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -201,6 +239,14 @@ function LotsPanel({ item }: { item: InventoryItem }) {
                       <TableCell className="text-right">{rwf(lot.unitCost)}</TableCell>
                       <TableCell className="text-muted-foreground">{lot.supplier?.name ?? '—'}</TableCell>
                       <TableCell className="text-muted-foreground">{new Date(lot.receivedAt).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        {lot.expiresAt ? (
+                          <span className={`flex items-center gap-1 ${isExpired(lot.expiresAt) ? 'text-destructive' : isExpiringSoon(lot.expiresAt) ? 'text-warning-foreground' : 'text-muted-foreground'}`}>
+                            {(isExpired(lot.expiresAt) || isExpiringSoon(lot.expiresAt)) && <AlertTriangle className="h-3.5 w-3.5" />}
+                            {new Date(lot.expiresAt).toLocaleString()}
+                          </span>
+                        ) : '—'}
+                      </TableCell>
                       <TableCell className="text-right">
                         <Button
                           size="sm"
@@ -339,25 +385,28 @@ export default function InventoryPage() {
   const [editing, setEditing] = useState<InventoryItem | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<InventoryItem | null>(null)
+  const [typeFilter, setTypeFilter] = useState<InventoryItemType | 'all'>('all')
 
   const { data: items = [], isLoading } = useInventory()
   const createMutation = useCreateInventoryItem()
   const updateMutation = useUpdateInventoryItem()
   const deleteMutation = useDeleteInventoryItem()
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<ItemFormValues>({
+  const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<ItemFormValues>({
     resolver: zodResolver(itemSchema),
+    defaultValues: { itemType: 'raw' },
   })
+  const itemType = watch('itemType')
 
   function openEdit(item: InventoryItem) {
     setEditing(item)
-    reset({ name: item.name, unit: item.unit, reorderLevel: item.reorderLevel })
+    reset({ name: item.name, unit: item.unit, itemType: item.itemType, reorderLevel: item.reorderLevel })
     setOpen(true)
   }
 
   function openCreate() {
     setEditing(null)
-    reset({ name: '', unit: '', reorderLevel: 0 })
+    reset({ name: '', unit: '', itemType: 'raw', reorderLevel: 0 })
     setOpen(true)
   }
 
@@ -373,7 +422,8 @@ export default function InventoryPage() {
   }
 
   const isPending = createMutation.isPending || updateMutation.isPending
-  const totalValue = items.reduce((s, i) => s + i.stockValue, 0)
+  const visibleItems = typeFilter === 'all' ? items : items.filter((i) => i.itemType === typeFilter)
+  const totalValue = visibleItems.reduce((s, i) => s + i.stockValue, 0)
 
   return (
     <div className="flex flex-col gap-6">
@@ -382,20 +432,27 @@ export default function InventoryPage() {
         action={<Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" />Add item</Button>}
       />
 
+      <Tabs value={typeFilter} onValueChange={(v) => setTypeFilter((v as InventoryItemType | 'all') ?? 'all')}>
+        <TabsList>
+          {ITEM_TYPE_TABS.map((t) => <TabsTrigger key={t.value} value={t.value}>{t.label}</TabsTrigger>)}
+        </TabsList>
+      </Tabs>
+
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
             <div className="flex flex-col gap-2 p-4">
               {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
             </div>
-          ) : items.length === 0 ? (
-            <EmptyState icon={Boxes} message="No inventory items yet." action={{ label: 'Add item', onClick: openCreate }} />
+          ) : visibleItems.length === 0 ? (
+            <EmptyState icon={Boxes} message="No inventory items in this category yet." action={{ label: 'Add item', onClick: openCreate }} />
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead />
                   <TableHead>Item</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Unit</TableHead>
                   <TableHead className="text-right">Current stock</TableHead>
                   <TableHead className="text-right">Value</TableHead>
@@ -404,13 +461,14 @@ export default function InventoryPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {items.map((item) => {
+                {visibleItems.map((item) => {
                   const isOpen = expandedId === item.id
                   return (
                     <Fragment key={item.id}>
                       <TableRow className="hover:bg-accent cursor-pointer" onClick={() => setExpandedId(isOpen ? null : item.id)}>
                         <TableCell className="w-8">{isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</TableCell>
                         <TableCell className="font-medium">{item.name}</TableCell>
+                        <TableCell><Badge variant="secondary">{ITEM_TYPE_LABELS[item.itemType]}</Badge></TableCell>
                         <TableCell className="text-muted-foreground">{item.unit}</TableCell>
                         <TableCell className="text-right">{item.currentStock.toFixed(2)}</TableCell>
                         <TableCell className="text-right">{rwf(item.stockValue)}</TableCell>
@@ -451,6 +509,21 @@ export default function InventoryPage() {
               <Label>Unit</Label>
               <Input placeholder="kg" {...register('unit')} />
               {errors.unit && <p className="text-xs text-destructive">{errors.unit.message}</p>}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Item type</Label>
+              <Select value={itemType ?? null} onValueChange={(v) => v && setValue('itemType', v as InventoryItemType)}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Item type" /></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(ITEM_TYPE_LABELS) as [InventoryItemType, string][]).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Raw = bought from suppliers. Prepared = only ever used as an ingredient in another recipe. Finished
+                good = ready to sell as-is (a cooked batch, a bottled drink).
+              </p>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>Reorder level</Label>

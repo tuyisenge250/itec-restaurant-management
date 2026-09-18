@@ -37,11 +37,16 @@ export async function GET(req: NextRequest) {
     const waiterId = user.role === 'waiter' ? user.sub : searchParams.get('waiterId') || undefined
     const from = searchParams.get('from')
     const to = searchParams.get('to')
+    // The kitchen board must never see direct-serve items or orders made up
+    // of nothing else — scoped server-side, not filtered client-side, same
+    // reasoning as the waiter scoping above.
+    const kitchenView = searchParams.get('view') === 'kitchen'
 
     const where: Prisma.OrderWhereInput = {
       status,
       table: table ? { contains: table, mode: 'insensitive' } : undefined,
       createdById: waiterId,
+      items: kitchenView ? { some: { requiresPreparation: true } } : undefined,
     }
     if (from || to) {
       where.createdAt = { gte: from ? new Date(from) : undefined, lte: to ? parseUpperBoundDate(to) : undefined }
@@ -64,7 +69,11 @@ export async function GET(req: NextRequest) {
       take: 200,
     })
 
-    return NextResponse.json(orders)
+    const result = kitchenView
+      ? orders.map((o) => ({ ...o, items: o.items.filter((i) => i.requiresPreparation) }))
+      : orders
+
+    return NextResponse.json(result)
   } catch (err) {
     return handleApiError(err)
   }

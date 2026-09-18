@@ -1,4 +1,5 @@
 import { Prisma, type InventoryTransactionSource } from '@prisma/client'
+import { prisma } from '@/lib/db/prisma'
 import { InsufficientStockError, BusinessRuleError, NotFoundError } from '@/lib/errors'
 import { recomputeAvailabilityForIngredient } from './menu.service'
 
@@ -140,6 +141,46 @@ export async function hasSufficientStock(
 }
 
 /**
+ * Read-only simulation of the LIFO-then-FIFO draw for `quantity` of an item,
+ * WITHOUT locking or mutating anything — for live cost estimates/previews
+ * (menu margins, prep/production-order ingredient cost) that must reflect the
+ * lots that would actually be drawn on fulfillment, not an averaged or
+ * arbitrary lot price. Uses the shared `prisma` client directly since it's
+ * never part of a caller's transaction.
+ */
+export async function simulateDrawCost(inventoryItemId: string, quantity: number): Promise<number> {
+  const [lifoLots, fifoLots] = await Promise.all([
+    prisma.inventoryLot.findMany({
+      where: { inventoryItemId, costingMethod: 'lifo', quantityRemaining: { gt: 0 } },
+      orderBy: { receivedAt: 'desc' },
+      select: { quantityRemaining: true, unitCost: true },
+    }),
+    prisma.inventoryLot.findMany({
+      where: { inventoryItemId, costingMethod: 'fifo', quantityRemaining: { gt: 0 } },
+      orderBy: { receivedAt: 'asc' },
+      select: { quantityRemaining: true, unitCost: true },
+    }),
+  ])
+
+  const candidates: { quantityRemaining: number; unitCost: number }[] = [...lifoLots, ...fifoLots]
+  let remaining = quantity
+  let cost = 0
+  for (const lot of candidates) {
+    if (remaining <= 0) break
+    const take = Math.min(lot.quantityRemaining, remaining)
+    cost += take * lot.unitCost
+    remaining -= take
+  }
+  // If stock is short of `quantity`, price the shortfall at the last known
+  // lot cost (or 0 with no lots at all) — this is a display estimate only,
+  // actual fulfillment will reject if stock is truly insufficient.
+  if (remaining > 0 && candidates.length > 0) {
+    cost += remaining * candidates[candidates.length - 1].unitCost
+  }
+  return cost
+}
+
+/**
  * Compensates a prior consumption (order item void) by crediting back the
  * exact lots it was drawn from, at the exact prices originally used — not a
  * flag flip. Looks up the original consumption transactions by referenceId
@@ -191,11 +232,12 @@ export async function receiveGoodsLine(
     quantity: number
     unitCost: number
     costingMethod: 'fifo' | 'lifo'
+    expiresAt?: Date | null
     referenceId?: string
     recordedById: string
   }
 ) {
-  const { inventoryItemId, supplierId, quantity, unitCost, costingMethod, referenceId, recordedById } =
+  const { inventoryItemId, supplierId, quantity, unitCost, costingMethod, expiresAt, referenceId, recordedById } =
     params
 
   const lot = await tx.inventoryLot.create({
@@ -206,6 +248,7 @@ export async function receiveGoodsLine(
       unitCost,
       quantityReceived: quantity,
       quantityRemaining: quantity,
+      expiresAt: expiresAt ?? undefined,
     },
   })
 

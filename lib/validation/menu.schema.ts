@@ -5,6 +5,8 @@ export const createMenuItemSchema = z.object({
   categoryId: z.string().optional(),
   price: z.number().positive(),
   preparationCost: z.number().nonnegative().default(0),
+  // false = direct-serve: no kitchen ticket, served immediately by the waiter.
+  requiresPreparation: z.boolean().default(true),
   recipe: z
     .array(z.object({ inventoryItemId: z.string().min(1), quantity: z.number().positive() }))
     .min(1),
@@ -15,6 +17,7 @@ export const updateMenuItemSchema = z.object({
   categoryId: z.string().nullable().optional(),
   price: z.number().positive().optional(),
   preparationCost: z.number().nonnegative().optional(),
+  requiresPreparation: z.boolean().optional(),
   isAvailable: z.boolean().optional(),
 })
 

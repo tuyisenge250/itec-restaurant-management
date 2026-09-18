@@ -13,6 +13,7 @@ import {
 } from '@/lib/validation/order.schema'
 
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'paid' | 'cancelled'
+export type OrderItemStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'voided'
 export type Order = {
   id: string; table: string; status: OrderStatus; createdById: string
   createdBy: { name: string }
@@ -22,6 +23,7 @@ export type Order = {
   createdAt: string; updatedAt: string
   items: {
     id: string; menuItemId: string; quantity: number; priceAtSale: number; costAtSale: number
+    requiresPreparation: boolean; status: OrderItemStatus; sentToKitchenAt: string | null
     isVoided: boolean; voidReason: string | null
     voidedById: string | null; voidedAt: string | null
     preparedById: string | null; preparedAt: string | null
@@ -48,7 +50,7 @@ export type OrderAuditLogEntry = {
 }
 export type OrderAuditLog = { auditLog: OrderAuditLogEntry[]; stockReversedItemIds: string[] }
 
-export type OrderFilters = { status?: string; table?: string; waiterId?: string; from?: string; to?: string }
+export type OrderFilters = { status?: string; table?: string; waiterId?: string; from?: string; to?: string; view?: 'kitchen' }
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>
 export type UpdateOrderItemsInput = z.infer<typeof updateOrderItemsSchema>
@@ -84,6 +86,10 @@ export const voidOrderItem = (orderItemId: string, data: VoidOrderItemInput) =>
     method: 'POST',
     body: JSON.stringify(data),
   })
+export const markOrderItemReady = (orderItemId: string) =>
+  apiFetch<Order['items'][number]>(`/api/order-items/${orderItemId}/ready`, { method: 'POST' })
+export const serveOrderItem = (orderItemId: string) =>
+  apiFetch<Order['items'][number]>(`/api/order-items/${orderItemId}/serve`, { method: 'POST' })
 
 export type OrderCogsBreakdown = {
   orderId: string
@@ -172,6 +178,30 @@ export function useVoidOrderItem() {
       qc.invalidateQueries({ queryKey: ['orders'] })
       qc.invalidateQueries({ queryKey: ['inventory'] })
       toast.success('Item voided')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+export function useMarkOrderItemReady() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: markOrderItemReady,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['inventory'] })
+      toast.success('Item marked ready')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+export function useServeOrderItem() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: serveOrderItem,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['inventory'] })
+      toast.success('Item served')
     },
     onError: (e: Error) => toast.error(e.message),
   })

@@ -26,7 +26,9 @@ import { rwf } from '@/lib/utils'
 import type { z } from 'zod'
 
 type CreateFormValues = z.infer<typeof createPurchaseOrderSchema>
-type ReceiveLine = { quantity: number; costingMethod: 'fifo' | 'lifo' | '' }
+// expiresAt is a plain yyyy-mm-dd string here (from a date input) — converted
+// to a Date only when building the request payload.
+type ReceiveLine = { quantity: number; costingMethod: 'fifo' | 'lifo' | ''; expiresAt: string }
 
 const ACTION_LABELS: Record<string, string> = {
   'purchase_order.pending_approval': 'Submitted for approval',
@@ -170,7 +172,7 @@ export default function PurchaseOrdersPage() {
     setReceivePO(po)
     const defaults: Record<string, ReceiveLine> = {}
     po.items.forEach((item) => {
-      defaults[item.id] = { quantity: item.quantityOrdered - item.quantityReceived, costingMethod: '' }
+      defaults[item.id] = { quantity: item.quantityOrdered - item.quantityReceived, costingMethod: '', expiresAt: '' }
     })
     setReceiveLines(defaults)
   }
@@ -188,6 +190,7 @@ export default function PurchaseOrdersPage() {
         purchaseOrderItemId: item.id,
         quantityReceived: receiveLines[item.id].quantity,
         costingMethod: receiveLines[item.id].costingMethod as 'fifo' | 'lifo',
+        expiresAt: receiveLines[item.id].expiresAt ? new Date(receiveLines[item.id].expiresAt) : undefined,
       }))
     if (items.length === 0) return
     await receiveMutation.mutateAsync({ id: receivePO.id, data: { items } })
@@ -355,16 +358,17 @@ export default function PurchaseOrdersPage() {
             <DialogTitle>Receive Stock — {receivePO?.supplier.name}</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-3">
-            <div className="grid grid-cols-[1fr_110px_130px] gap-2 text-xs font-medium text-muted-foreground px-1">
+            <div className="grid grid-cols-[1fr_100px_110px_130px] gap-2 text-xs font-medium text-muted-foreground px-1">
               <span>Item</span>
               <span className="text-right">Qty to receive</span>
               <span>Costing method</span>
+              <span>Expires (optional)</span>
             </div>
             {receivePO?.items.map((item) => {
               const remaining = item.quantityOrdered - item.quantityReceived
-              const line = receiveLines[item.id] ?? { quantity: remaining, costingMethod: '' }
+              const line = receiveLines[item.id] ?? { quantity: remaining, costingMethod: '', expiresAt: '' }
               return (
-                <div key={item.id} className="grid grid-cols-[1fr_110px_130px] gap-2 items-center">
+                <div key={item.id} className="grid grid-cols-[1fr_100px_110px_130px] gap-2 items-center">
                   <div className="flex flex-col">
                     <span className="text-sm font-medium">{item.inventoryItem.name}</span>
                     <span className="text-xs text-muted-foreground">
@@ -391,6 +395,11 @@ export default function PurchaseOrdersPage() {
                       <SelectItem value="lifo">LIFO</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Input
+                    type="date"
+                    value={line.expiresAt}
+                    onChange={(e) => setReceiveLines((prev) => ({ ...prev, [item.id]: { ...line, expiresAt: e.target.value } }))}
+                  />
                 </div>
               )
             })}

@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge'
 type Status =
   | 'pending' | 'preparing' | 'ready' | 'served' | 'paid' | 'cancelled'
   | 'draft' | 'pending_approval' | 'ordered' | 'partially_received' | 'received'
-  | 'active' | 'inactive' | 'low_stock'
+  | 'active' | 'inactive' | 'low_stock' | 'fulfilled'
 
 const config: Record<Status, { label: string; className: string }> = {
   pending:            { label: 'Pending',            className: 'border border-border bg-muted text-foreground' },
@@ -20,6 +20,7 @@ const config: Record<Status, { label: string; className: string }> = {
   active:             { label: 'Active',             className: 'border border-success/20 bg-success text-success-foreground' },
   inactive:           { label: 'Inactive',           className: 'border border-border bg-muted text-foreground' },
   low_stock:          { label: 'Low Stock',          className: 'border border-warning/30 bg-warning text-warning-foreground' },
+  fulfilled:          { label: 'Fulfilled',          className: 'border border-success/20 bg-success text-success-foreground' },
 }
 
 export function StatusBadge({ status }: { status: string }) {

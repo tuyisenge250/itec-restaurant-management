@@ -6,7 +6,7 @@ import { createMenuItemSchema, updateMenuItemSchema } from '@/lib/validation/men
 
 export type MenuItem = {
   id: string; name: string; categoryId: string | null; category: { name: string } | null
-  price: number; preparationCost: number
+  price: number; preparationCost: number; requiresPreparation: boolean
   isAvailable: boolean; createdAt: string; updatedAt: string
   recipeItems: { inventoryItemId: string; quantity: number; inventoryItem: { name: string; currentStock: number } }[]
 }

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Minus, Send, UtensilsCrossed, Loader2, AlertTriangle } from 'lucide-react'
+import { Plus, Minus, Send, UtensilsCrossed, Loader2, AlertTriangle, ChefHat, Zap } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -95,7 +95,12 @@ export default function NewOrderPage() {
                       <CardContent className="flex items-center justify-between p-4">
                         <div>
                           <p className="font-medium text-foreground">{item.name}</p>
-                          <p className="text-sm text-muted-foreground">{rwf(item.price)}</p>
+                          <p className="flex items-center gap-1 text-sm text-muted-foreground">
+                            {rwf(item.price)}
+                            {item.requiresPreparation
+                              ? <ChefHat className="h-3 w-3" />
+                              : <Zap className="h-3 w-3" />}
+                          </p>
                         </div>
                         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground">
                           <Plus className="h-4 w-4" />

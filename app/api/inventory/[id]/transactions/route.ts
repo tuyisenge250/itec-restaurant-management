@@ -37,8 +37,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const saleRefs = [...new Set(transactions.filter((t) => t.source === 'sale' && t.referenceId).map((t) => t.referenceId!))]
     const poRefs = [...new Set(transactions.filter((t) => t.source === 'purchase_order' && t.referenceId).map((t) => t.referenceId!))]
     const prepRefs = [...new Set(transactions.filter((t) => t.source === 'prep_production' && t.referenceId).map((t) => t.referenceId!))]
+    // A production run's receipt transaction shares its lotId with the run's
+    // producedLotId — that's how we tell an internal batch from an outside
+    // one (referenceId alone is just the recipe, shared by every run of it).
+    const productionLotIds = [
+      ...new Set(transactions.filter((t) => t.source === 'prep_production' && t.type === 'receipt').map((t) => t.lotId)),
+    ]
 
-    const [orderItems, purchaseOrders, prepRecipes] = await Promise.all([
+    const [orderItems, purchaseOrders, prepRecipes, productionRuns] = await Promise.all([
       saleRefs.length
         ? prisma.orderItem.findMany({
             where: { id: { in: saleRefs } },
@@ -61,11 +67,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
             include: { outputItem: { select: { name: true } } },
           })
         : [],
+      productionLotIds.length
+        ? prisma.prepProductionRun.findMany({ where: { producedLotId: { in: productionLotIds } } })
+        : [],
     ])
 
     const orderItemMap = new Map(orderItems.map((oi) => [oi.id, oi]))
     const poMap = new Map(purchaseOrders.map((po) => [po.id, po]))
     const prepMap = new Map(prepRecipes.map((pr) => [pr.id, pr]))
+    const runByLotId = new Map(productionRuns.map((r) => [r.producedLotId, r]))
 
     const enriched = transactions.map((t) => {
       if (t.source === 'sale' && t.referenceId) {
@@ -107,12 +117,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       } else if (t.source === 'prep_production' && t.referenceId) {
         const pr = prepMap.get(t.referenceId)
         if (pr) {
+          const run = runByLotId.get(t.lotId)
           return {
             ...t,
             reference: {
               kind: 'prep_recipe' as const,
               prepRecipeId: pr.id,
               outputItemName: pr.outputItem.name,
+              productionSource: run?.source ?? null,
+              laborCost: run?.laborCost ?? null,
+              outsideCost: run?.outsideCost ?? null,
             },
           }
         }
