@@ -4,7 +4,7 @@ const secret = new TextEncoder().encode(process.env.JWT_SECRET)
 
 export type JwtPayload = {
   sub: string
-  role: 'admin' | 'kitchen' | 'waiter'
+  role: 'admin' | 'kitchen' | 'waiter' | 'cashier'
   name: string
 }
 

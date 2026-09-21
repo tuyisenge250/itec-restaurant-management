@@ -35,6 +35,12 @@ export const updatePurchaseOrderStatusSchema = z.object({
   status: z.enum(['pending_approval', 'ordered', 'cancelled']),
 })
 
+export const recordSupplierPaymentSchema = z.object({
+  amount: z.number().positive(),
+  method: z.enum(['cash', 'card', 'momo', 'other']),
+  notes: z.string().optional(),
+})
+
 export const receivePurchaseOrderSchema = z.object({
   items: z
     .array(

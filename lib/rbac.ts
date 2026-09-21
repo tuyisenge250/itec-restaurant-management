@@ -7,6 +7,7 @@ import { BusinessRuleError } from '@/lib/errors'
 export const DISCOUNT_CAPS: Record<Role, number> = {
   waiter: 15,
   kitchen: 0,
+  cashier: 15,
   admin: 100,
 }
 

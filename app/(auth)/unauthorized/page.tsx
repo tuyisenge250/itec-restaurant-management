@@ -9,6 +9,7 @@ const roleHome: Record<string, string> = {
   admin: '/admin',
   kitchen: '/kitchen/orders',
   waiter: '/waiter/orders',
+  cashier: '/cashier/queue',
 }
 
 export default function UnauthorizedPage() {

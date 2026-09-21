@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
-import { Eye, EyeOff, Loader2, ShieldCheck, ChefHat, ConciergeBell } from 'lucide-react'
+import { Eye, EyeOff, Loader2, ShieldCheck, ChefHat, ConciergeBell, Wallet } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -12,12 +12,14 @@ const demoUsers = [
   { label: 'Admin',   email: 'admin@demo.com',   password: 'demo1234', icon: ShieldCheck,   color: 'text-primary' },
   { label: 'Kitchen', email: 'kitchen@demo.com', password: 'demo1234', icon: ChefHat,       color: 'text-warning' },
   { label: 'Waiter',  email: 'waiter@demo.com',  password: 'demo1234', icon: ConciergeBell, color: 'text-success' },
+  { label: 'Cashier', email: 'cashier@demo.com', password: 'demo1234', icon: Wallet,        color: 'text-success' },
 ]
 
 const roleRedirect: Record<string, string> = {
   admin:   '/admin',
   kitchen: '/kitchen/orders',
   waiter:  '/waiter/orders',
+  cashier: '/cashier/queue',
 }
 
 export default function LoginPage() {

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import Image from 'next/image'
-import { LogOut, LayoutDashboard, ChefHat, Receipt } from 'lucide-react'
+import { LogOut, LayoutDashboard, ChefHat, Receipt, Wallet } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -21,13 +21,14 @@ import { navByRole, type Role } from '@/lib/nav-config'
 import { useCurrentUser } from '@/lib/api/auth'
 import { cn } from '@/lib/utils'
 
-// Admin accounts can also work as kitchen or waiter (the backend already
-// grants admin every kitchen/waiter permission) — this lets them jump
-// between the three areas without logging out.
+// Admin accounts can also work as kitchen, waiter, or cashier (the backend
+// already grants admin every one of their permissions) — this lets them
+// jump between the four areas without logging out.
 const ACCOUNT_VIEWS: { role: Role; label: string; href: string; icon: typeof LayoutDashboard }[] = [
   { role: 'admin', label: 'Admin', href: '/admin', icon: LayoutDashboard },
   { role: 'kitchen', label: 'Kitchen', href: '/kitchen/orders', icon: ChefHat },
   { role: 'waiter', label: 'Waiter', href: '/waiter/orders/new', icon: Receipt },
+  { role: 'cashier', label: 'Cashier', href: '/cashier/queue', icon: Wallet },
 ]
 
 export function AppSidebar({ role }: { role: Role }) {
@@ -61,7 +62,7 @@ export function AppSidebar({ role }: { role: Role }) {
       <SidebarContent>
         {user?.role === 'admin' && (
           <div className="px-3 pt-3">
-            <div className="flex gap-1 rounded-md border border-sidebar-border bg-primary-foreground/10 p-1">
+            <div className="grid grid-cols-2 gap-1 rounded-md border border-sidebar-border bg-primary-foreground/10 p-1">
               {ACCOUNT_VIEWS.map((view) => {
                 const isActiveView = role === view.role
                 return (
@@ -69,7 +70,7 @@ export function AppSidebar({ role }: { role: Role }) {
                     key={view.role}
                     href={view.href}
                     className={cn(
-                      'flex flex-1 items-center justify-center gap-1.5 rounded-sm px-2 py-1.5 text-xs font-medium transition-colors',
+                      'flex items-center justify-center gap-1.5 rounded-sm px-2 py-1.5 text-xs font-medium transition-colors',
                       isActiveView
                         ? 'bg-sidebar-primary text-sidebar-primary-foreground shadow-sm'
                         : 'text-primary-foreground/70 hover:bg-primary-foreground/10 hover:text-primary-foreground'

@@ -34,6 +34,10 @@ export async function GET(
               },
             },
           },
+          payments: {
+            orderBy: { createdAt: 'desc' },
+            include: { recordedBy: { select: { name: true } } },
+          },
         },
       }),
       prisma.auditLog.findMany({

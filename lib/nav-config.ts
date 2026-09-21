@@ -17,7 +17,7 @@ import {
   Package,
 } from 'lucide-react'
 
-export type Role = 'admin' | 'kitchen' | 'waiter'
+export type Role = 'admin' | 'kitchen' | 'waiter' | 'cashier'
 
 export type NavItem = {
   title: string
@@ -46,6 +46,10 @@ export const navByRole: Record<Role, NavItem[]> = {
   waiter: [
     { title: 'New order', url: '/waiter/orders/new', icon: Receipt },
     { title: 'Orders', url: '/waiter/orders', icon: ClipboardList },
-    { title: 'Payments', url: '/waiter/payments', icon: CreditCard },
+  ],
+  cashier: [
+    { title: 'To confirm', url: '/cashier/queue', icon: Receipt },
+    { title: 'Orders', url: '/cashier/orders', icon: ListOrdered },
+    { title: 'Payments', url: '/cashier/payments', icon: CreditCard },
   ],
 }

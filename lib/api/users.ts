@@ -2,8 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
 import { toast } from 'sonner'
 
-export type User = { id: string; name: string; email: string; role: 'admin' | 'kitchen' | 'waiter'; isActive: boolean; createdAt: string }
-export type CreateUserInput = { name: string; email: string; password: string; role: 'admin' | 'kitchen' | 'waiter' }
+export type User = { id: string; name: string; email: string; role: 'admin' | 'kitchen' | 'waiter' | 'cashier'; isActive: boolean; createdAt: string }
+export type CreateUserInput = { name: string; email: string; password: string; role: 'admin' | 'kitchen' | 'waiter' | 'cashier' }
 export type UpdateUserInput = Partial<Omit<CreateUserInput, 'password'> & { password: string; isActive: boolean }>
 
 export const getUsers = () => apiFetch<User[]>('/api/users')

@@ -14,6 +14,7 @@ enum Role {
   admin
   kitchen
   waiter
+  cashier
 }
 
 model User {
@@ -26,19 +27,20 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  purchaseOrdersCreated   PurchaseOrder[]        @relation("POCreatedBy")
-  purchaseOrdersApproved  PurchaseOrder[]        @relation("POApprovedBy")
-  goodsReceipts           GoodsReceipt[]         @relation("ReceivedByUser")
-  inventoryTransactions   InventoryTransaction[] @relation("RecordedByUser")
-  prepProductionRuns      PrepProductionRun[]    @relation("PrepRecordedByUser")
-  productionOrdersCreated PrepProductionOrder[]  @relation("ProductionOrderCreatedBy")
-  orders                  Order[]                @relation("CreatedByWaiter")
-  ordersStarted           Order[]                @relation("OrderStartedBy")
-  preparedOrderItems      OrderItem[]            @relation("PreparedByKitchen")
-  voidedOrderItems        OrderItem[]            @relation("VoidedByUser")
-  payments                Payment[]              @relation("RecordedByUser")
-  expensesRecorded        Expense[]              @relation("ExpenseRecordedBy")
-  auditLogs               AuditLog[]
+  purchaseOrdersCreated    PurchaseOrder[]        @relation("POCreatedBy")
+  purchaseOrdersApproved   PurchaseOrder[]        @relation("POApprovedBy")
+  goodsReceipts            GoodsReceipt[]         @relation("ReceivedByUser")
+  supplierPaymentsRecorded SupplierPayment[]      @relation("SupplierPaymentRecordedBy")
+  inventoryTransactions    InventoryTransaction[] @relation("RecordedByUser")
+  prepProductionRuns       PrepProductionRun[]    @relation("PrepRecordedByUser")
+  productionOrdersCreated  PrepProductionOrder[]  @relation("ProductionOrderCreatedBy")
+  orders                   Order[]                @relation("CreatedByWaiter")
+  ordersStarted            Order[]                @relation("OrderStartedBy")
+  preparedOrderItems       OrderItem[]            @relation("PreparedByKitchen")
+  voidedOrderItems         OrderItem[]            @relation("VoidedByUser")
+  payments                 Payment[]              @relation("RecordedByUser")
+  expensesRecorded         Expense[]              @relation("ExpenseRecordedBy")
+  auditLogs                AuditLog[]
 
   @@map("users")
 }
@@ -59,6 +61,7 @@ model Supplier {
 
   purchaseOrders PurchaseOrder[]
   inventoryLots  InventoryLot[] // denormalized for fast "price history per supplier per item" queries
+  payments       SupplierPayment[]
 
   @@map("suppliers")
 }
@@ -95,8 +98,30 @@ model PurchaseOrder {
 
   items         PurchaseOrderItem[]
   goodsReceipts GoodsReceipt[]
+  payments      SupplierPayment[]
 
   @@map("purchase_orders")
+}
+
+// Tracks what's actually been paid to the supplier against a PO — separate
+// from GoodsReceipt (which records what arrived and prices the inventory
+// lot). "Amount owed" is derived as received value (sum of goods-receipt
+// lines, the actual invoiced cost) minus payments, never ordered value —
+// you don't owe for what hasn't been delivered yet.
+model SupplierPayment {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  supplierId      String // denormalized for fast "all payments to this supplier" queries
+  supplier        Supplier      @relation(fields: [supplierId], references: [id])
+  amount          Float
+  method          PaymentMethod
+  notes           String?
+  recordedById    String
+  recordedBy      User          @relation("SupplierPaymentRecordedBy", fields: [recordedById], references: [id])
+  createdAt       DateTime      @default(now())
+
+  @@map("supplier_payments")
 }
 
 model PurchaseOrderItem {

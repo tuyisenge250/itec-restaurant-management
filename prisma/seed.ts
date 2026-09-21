@@ -34,6 +34,12 @@ async function main() {
     create: { name: 'Waiter User', email: 'waiter@demo.com', passwordHash, role: 'waiter' },
   })
 
+  await prisma.user.upsert({
+    where: { email: 'cashier@demo.com' },
+    update: {},
+    create: { name: 'Cashier User', email: 'cashier@demo.com', passwordHash, role: 'cashier' },
+  })
+
   const supplier = await prisma.supplier.create({
     data: {
       name: 'Fresh Farms Ltd',
@@ -153,6 +159,7 @@ async function main() {
   console.log('  ops@demo.com     / demo1234  (approved the seeded PO)')
   console.log('  kitchen@demo.com / demo1234')
   console.log('  waiter@demo.com  / demo1234')
+  console.log('  cashier@demo.com / demo1234')
   console.log(`Seeded ${po.items.length} inventory lots for supplier "${supplier.name}".`)
   console.log(`Seeded menu item "${pizza.name}" with a 3-ingredient recipe.`)
 }

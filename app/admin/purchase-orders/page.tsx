@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useForm, useFieldArray } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, ClipboardList, Trash2, Loader2, PackageCheck, RotateCcw, History } from 'lucide-react'
+import { Plus, ClipboardList, Trash2, Loader2, PackageCheck, RotateCcw, History, Wallet } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Card, CardContent } from '@/components/ui/card'
 import {
   usePurchaseOrders, usePurchaseOrder, useCreatePurchaseOrder, useReceivePurchaseOrder,
-  useUpdatePurchaseOrderStatus, useReorderPurchaseOrder, type PurchaseOrder,
+  useUpdatePurchaseOrderStatus, useReorderPurchaseOrder, useRecordSupplierPayment, type PurchaseOrder,
 } from '@/lib/api/purchase-orders'
 import { useSuppliers } from '@/lib/api/suppliers'
 import { useInventory } from '@/lib/api/inventory'
@@ -35,13 +35,44 @@ const ACTION_LABELS: Record<string, string> = {
   'purchase_order.approved': 'Approved',
   'purchase_order.cancelled': 'Cancelled',
   'purchase_order.goods_received': 'Goods received',
+  'supplier_payment.recorded': 'Payment recorded',
 }
+
+const PAYABLE_STATUSES: PurchaseOrder['status'][] = ['ordered', 'partially_received', 'received']
 
 function PurchaseOrderDetailDialog({ poId, onClose }: { poId: string | null; onClose: () => void }) {
   const { data: po, isLoading } = usePurchaseOrder(poId ?? undefined)
+  const recordPayment = useRecordSupplierPayment()
+  const [paymentOpen, setPaymentOpen] = useState(false)
+  const [amount, setAmount] = useState('')
+  const [method, setMethod] = useState<'cash' | 'card' | 'momo' | 'other'>('cash')
+  const [notes, setNotes] = useState('')
+
+  // Owed is derived from what was actually RECEIVED (the real invoiced
+  // value), never what was ordered — you don't owe for goods still in
+  // transit or never delivered.
+  const receivedValue = po?.goodsReceipts.reduce(
+    (s, gr) => s + gr.lines.reduce((s2, l) => s2 + l.quantityReceived * l.unitCost, 0), 0
+  ) ?? 0
+  const paidValue = po?.payments.reduce((s, p) => s + p.amount, 0) ?? 0
+  const owed = receivedValue - paidValue
+  const canPay = !!po && PAYABLE_STATUSES.includes(po.status)
+
+  function resetPaymentForm() {
+    setPaymentOpen(false)
+    setAmount('')
+    setMethod('cash')
+    setNotes('')
+  }
+
+  async function submitPayment() {
+    if (!po || !amount) return
+    await recordPayment.mutateAsync({ id: po.id, data: { amount: parseFloat(amount), method, notes: notes || undefined } })
+    resetPaymentForm()
+  }
 
   return (
-    <Dialog open={!!poId} onOpenChange={(o) => { if (!o) onClose() }}>
+    <Dialog open={!!poId} onOpenChange={(o) => { if (!o) { resetPaymentForm(); onClose() } }}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Purchase order detail</DialogTitle></DialogHeader>
         {isLoading || !po ? (
@@ -112,6 +143,70 @@ function PurchaseOrderDetailDialog({ poId, onClose }: { poId: string | null; onC
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {(canPay || po.payments.length > 0) && (
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="flex items-center gap-1.5 text-sm font-medium"><Wallet className="h-3.5 w-3.5" />Payments to supplier</p>
+                  {canPay && !paymentOpen && (
+                    <Button size="sm" variant="outline" onClick={() => setPaymentOpen(true)}>Record payment</Button>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-3 rounded-md border border-border p-3 text-sm">
+                  <div><span className="text-muted-foreground">Received value</span><p className="font-medium">{rwf(receivedValue)}</p></div>
+                  <div><span className="text-muted-foreground">Paid</span><p className="font-medium">{rwf(paidValue)}</p></div>
+                  <div>
+                    <span className="text-muted-foreground">{owed > 0 ? 'Owed' : 'Credit'}</span>
+                    <p className={`font-medium ${owed > 0 ? 'text-destructive' : 'text-success'}`}>{rwf(Math.abs(owed))}</p>
+                  </div>
+                </div>
+
+                {paymentOpen && (
+                  <div className="mt-2 flex flex-col gap-2 rounded-md border border-border p-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Amount</Label>
+                        <Input type="number" step="0.01" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Method</Label>
+                        <Select value={method} onValueChange={(v) => v && setMethod(v as typeof method)}>
+                          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="cash">Cash</SelectItem>
+                            <SelectItem value="card">Card</SelectItem>
+                            <SelectItem value="momo">Mobile money</SelectItem>
+                            <SelectItem value="other">Other</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <Input placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="outline" onClick={resetPaymentForm}>Cancel</Button>
+                      <Button size="sm" disabled={!amount || recordPayment.isPending} onClick={submitPayment}>
+                        {recordPayment.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Save payment
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {po.payments.length > 0 && (
+                  <ul className="mt-2 flex flex-col gap-1">
+                    {po.payments.map((p) => (
+                      <li key={p.id} className="flex justify-between text-sm">
+                        <span>
+                          {rwf(p.amount)} · {p.method === 'momo' ? 'Mobile money' : p.method[0].toUpperCase() + p.method.slice(1)} by{' '}
+                          <span className="font-medium">{p.recordedBy.name}</span>{p.notes ? ` — ${p.notes}` : ''}
+                        </span>
+                        <span className="text-muted-foreground">{new Date(p.createdAt).toLocaleString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
 

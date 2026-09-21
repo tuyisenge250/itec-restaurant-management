@@ -13,19 +13,20 @@ import { rwf } from '@/lib/utils'
 
 type Source = 'internal' | 'outside'
 
-// Shared by the admin prep-recipes tab and the kitchen finished-stock page —
-// both admin and kitchen can log a production run (matches the API's role
-// check), only admin can define/edit the recipe itself. `simplified` hides
-// the labor-cost and costing-method fields for kitchen's quick, in-the-
-// moment use (both still default to a sensible value — 0 and FIFO — under
-// the hood); admin keeps the full form for actual cost accounting.
+// Admin's own ad-hoc "Produce batch" action on the prep-recipes tab (the
+// kitchen used to have its own free-standing version of this, but that was
+// replaced by the request-driven ProductionOrdersQueue — kitchen now only
+// ever produces against an admin-issued order). Labor cost is dropped
+// entirely: it was reference-only, never folded into unit cost, and is
+// tracked properly as a period Expense instead. `simplified` hides the
+// costing-method and expiry fields, unused by any caller today but kept for
+// a future simplified entry point.
 export function ProduceBatchDialog({
   recipe, onClose, simplified = false,
 }: { recipe: PrepRecipe | null; onClose: () => void; simplified?: boolean }) {
   const produce = useProducePrepRecipe()
   const [source, setSource] = useState<Source>('internal')
   const [quantityProduced, setQuantityProduced] = useState('')
-  const [laborCost, setLaborCost] = useState('0')
   const [outsideCost, setOutsideCost] = useState('')
   const [costingMethod, setCostingMethod] = useState<'fifo' | 'lifo'>('fifo')
   const [expiresAt, setExpiresAt] = useState('')
@@ -33,7 +34,6 @@ export function ProduceBatchDialog({
   function reset() {
     setSource('internal')
     setQuantityProduced('')
-    setLaborCost('0')
     setOutsideCost('')
     setCostingMethod('fifo')
     setExpiresAt('')
@@ -55,7 +55,7 @@ export function ProduceBatchDialog({
       data: {
         quantityProduced: parseFloat(quantityProduced),
         source,
-        laborCost: source === 'internal' ? parseFloat(laborCost) || 0 : 0,
+        laborCost: 0,
         outsideCost: source === 'outside' ? parseFloat(outsideCost) || 0 : undefined,
         costingMethod,
         expiresAt: expiresAt ? new Date(expiresAt) : undefined,
@@ -104,14 +104,7 @@ export function ProduceBatchDialog({
               />
             </div>
 
-            {source === 'internal' ? (
-              !simplified && (
-                <div className="flex flex-col gap-1.5">
-                  <Label>Labor cost <span className="text-muted-foreground">(reference only — not folded into unit cost)</span></Label>
-                  <Input type="number" step="0.01" value={laborCost} onChange={(e) => setLaborCost(e.target.value)} />
-                </div>
-              )
-            ) : (
+            {source === 'outside' && (
               <div className="flex flex-col gap-1.5">
                 <Label>Service fee paid <span className="text-muted-foreground">(on top of ingredient cost)</span></Label>
                 <Input type="number" step="0.01" placeholder="0.00" value={outsideCost} onChange={(e) => setOutsideCost(e.target.value)} />

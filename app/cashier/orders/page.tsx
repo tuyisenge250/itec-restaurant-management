@@ -1,5 +1,5 @@
 import { OrdersOverview } from '@/components/orders-overview'
 
-export default function AdminOrdersPage() {
+export default function CashierOrdersPage() {
   return <OrdersOverview />
 }

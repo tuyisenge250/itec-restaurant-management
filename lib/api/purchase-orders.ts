@@ -6,6 +6,7 @@ import {
   createPurchaseOrderSchema,
   receivePurchaseOrderSchema,
   updatePurchaseOrderStatusSchema,
+  recordSupplierPaymentSchema,
 } from '@/lib/validation/purchase-order.schema'
 
 export type PurchaseOrderStatus =
@@ -23,6 +24,15 @@ export type PurchaseOrder = {
 export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>
 export type ReceivePurchaseOrderInput = z.infer<typeof receivePurchaseOrderSchema>
 export type UpdatePurchaseOrderStatusInput = z.infer<typeof updatePurchaseOrderStatusSchema>
+export type RecordSupplierPaymentInput = z.infer<typeof recordSupplierPaymentSchema>
+export type SupplierPayment = {
+  id: string
+  amount: number
+  method: 'cash' | 'card' | 'momo' | 'other'
+  notes: string | null
+  createdAt: string
+  recordedBy: { name: string }
+}
 
 export type PurchaseOrderDetail = PurchaseOrder & {
   notes: string | null
@@ -46,6 +56,7 @@ export type PurchaseOrderDetail = PurchaseOrder & {
       purchaseOrderItem: { inventoryItem: { name: string; unit: string } }
     }[]
   }[]
+  payments: SupplierPayment[]
   auditLog: {
     id: string
     action: string
@@ -66,6 +77,8 @@ export const updatePurchaseOrderStatus = (id: string, data: UpdatePurchaseOrderS
   apiFetch<PurchaseOrder>(`/api/purchase-orders/${id}/status`, { method: 'PATCH', body: JSON.stringify(data) })
 export const reorderPurchaseOrder = (id: string) =>
   apiFetch<PurchaseOrder>(`/api/purchase-orders/${id}/reorder`, { method: 'POST' })
+export const recordSupplierPayment = (id: string, data: RecordSupplierPaymentInput) =>
+  apiFetch<SupplierPayment>(`/api/purchase-orders/${id}/payments`, { method: 'POST', body: JSON.stringify(data) })
 
 export function usePurchaseOrders() {
   return useQuery({ queryKey: ['purchase-orders'], queryFn: getPurchaseOrders })
@@ -107,6 +120,18 @@ export function useReorderPurchaseOrder() {
   return useMutation({
     mutationFn: reorderPurchaseOrder,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase-orders'] }); toast.success('Reorder draft created') },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+export function useRecordSupplierPayment() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: RecordSupplierPaymentInput }) => recordSupplierPayment(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchase-orders'] })
+      qc.invalidateQueries({ queryKey: ['suppliers'] })
+      toast.success('Payment recorded')
+    },
     onError: (e: Error) => toast.error(e.message),
   })
 }

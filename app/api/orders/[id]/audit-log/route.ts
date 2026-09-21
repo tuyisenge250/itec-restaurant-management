@@ -17,7 +17,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireRole('admin', 'kitchen', 'waiter')
+    const user = await requireRole('admin', 'kitchen', 'waiter', 'cashier')
     const { id } = await params
 
     const order = await prisma.order.findUniqueOrThrow({

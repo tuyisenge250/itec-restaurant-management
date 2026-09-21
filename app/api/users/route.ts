@@ -10,12 +10,15 @@ const createUserSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(6),
-  role: z.enum(['admin', 'kitchen', 'waiter']),
+  role: z.enum(['admin', 'kitchen', 'waiter', 'cashier']),
 })
 
 export async function GET() {
   try {
-    await requireRole('admin')
+    // Cashier gets read access to the staff list too — its oversight
+    // dashboard filters orders by waiter, same as admin's does. Creating,
+    // editing, or deactivating an account stays admin-only below.
+    await requireRole('admin', 'cashier')
     const users = await prisma.user.findMany({
       orderBy: { name: 'asc' },
       select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true },

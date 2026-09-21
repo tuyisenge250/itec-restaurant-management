@@ -27,6 +27,8 @@ import {
   useInventoryLots, useInventoryTransactions, useAdjustStock, useAdjustLotPrice, useProducible,
   type InventoryItem, type InventoryItemType, type InventoryTransaction,
 } from '@/lib/api/inventory'
+import { useCreateMenuItem } from '@/lib/api/menu'
+import { useMenuCategories } from '@/lib/api/menu-categories'
 import { rwf } from '@/lib/utils'
 
 const itemSchema = z.object({
@@ -386,11 +388,21 @@ export default function InventoryPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<InventoryItem | null>(null)
   const [typeFilter, setTypeFilter] = useState<InventoryItemType | 'all'>('all')
+  // Finished goods (Soda, Fanta, a bottled liquor) are sold exactly as
+  // stocked, with no recipe of their own beyond "1 unit of itself" — opt-in
+  // at creation time saves the trip to the Menu page to hand-build that
+  // trivial 1:1 recipe. Only offered when creating (not editing) a Finished
+  // good item.
+  const [addToMenu, setAddToMenu] = useState(false)
+  const [menuPrice, setMenuPrice] = useState('')
+  const [menuCategoryId, setMenuCategoryId] = useState<string | undefined>(undefined)
 
   const { data: items = [], isLoading } = useInventory()
+  const { data: menuCategories = [] } = useMenuCategories()
   const createMutation = useCreateInventoryItem()
   const updateMutation = useUpdateInventoryItem()
   const deleteMutation = useDeleteInventoryItem()
+  const createMenuItemMutation = useCreateMenuItem()
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<ItemFormValues>({
     resolver: zodResolver(itemSchema),
@@ -398,15 +410,23 @@ export default function InventoryPage() {
   })
   const itemType = watch('itemType')
 
+  function resetMenuFields() {
+    setAddToMenu(false)
+    setMenuPrice('')
+    setMenuCategoryId(undefined)
+  }
+
   function openEdit(item: InventoryItem) {
     setEditing(item)
     reset({ name: item.name, unit: item.unit, itemType: item.itemType, reorderLevel: item.reorderLevel })
+    resetMenuFields()
     setOpen(true)
   }
 
   function openCreate() {
     setEditing(null)
     reset({ name: '', unit: '', itemType: 'raw', reorderLevel: 0 })
+    resetMenuFields()
     setOpen(true)
   }
 
@@ -414,14 +434,26 @@ export default function InventoryPage() {
     if (editing) {
       await updateMutation.mutateAsync({ id: editing.id, data: values })
     } else {
-      await createMutation.mutateAsync(values)
+      const created = await createMutation.mutateAsync(values)
+      if (addToMenu) {
+        await createMenuItemMutation.mutateAsync({
+          name: created.name,
+          categoryId: menuCategoryId,
+          price: parseFloat(menuPrice),
+          preparationCost: 0,
+          requiresPreparation: false,
+          recipe: [{ inventoryItemId: created.id, quantity: 1 }],
+        })
+      }
     }
     reset()
+    resetMenuFields()
     setOpen(false)
     setEditing(null)
   }
 
-  const isPending = createMutation.isPending || updateMutation.isPending
+  const canSubmitMenu = !addToMenu || (!!menuPrice && parseFloat(menuPrice) > 0)
+  const isPending = createMutation.isPending || updateMutation.isPending || createMenuItemMutation.isPending
   const visibleItems = typeFilter === 'all' ? items : items.filter((i) => i.itemType === typeFilter)
   const totalValue = visibleItems.reduce((s, i) => s + i.stockValue, 0)
 
@@ -529,9 +561,50 @@ export default function InventoryPage() {
               <Label>Reorder level</Label>
               <Input type="number" placeholder="10" {...register('reorderLevel')} />
             </div>
+
+            {!editing && itemType === 'finished_good' && (
+              <div className="flex flex-col gap-3 rounded-md border border-border p-3">
+                <label className="flex items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-border"
+                    checked={addToMenu}
+                    onChange={(e) => setAddToMenu(e.target.checked)}
+                  />
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-sm font-medium text-foreground">Also add to menu</span>
+                    <span className="text-xs text-muted-foreground">
+                      Ready-to-sell as-is (a Coke, Fanta, a bottled liquor) — creates a direct-serve menu item
+                      that sells this item 1-for-1, no separate recipe needed.
+                    </span>
+                  </span>
+                </label>
+                {addToMenu && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Sell price</Label>
+                      <Input
+                        type="number" step="0.01" placeholder="1500"
+                        value={menuPrice} onChange={(e) => setMenuPrice(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Category <span className="text-muted-foreground">(optional)</span></Label>
+                      <Select value={menuCategoryId ?? null} onValueChange={(v) => setMenuCategoryId(v ?? undefined)}>
+                        <SelectTrigger className="w-full"><SelectValue placeholder="Category" /></SelectTrigger>
+                        <SelectContent>
+                          {menuCategories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => { setOpen(false); setEditing(null); reset() }}>Cancel</Button>
-              <Button type="submit" disabled={isPending}>
+              <Button type="button" variant="outline" onClick={() => { setOpen(false); setEditing(null); reset(); resetMenuFields() }}>Cancel</Button>
+              <Button type="submit" disabled={isPending || !canSubmitMenu}>
                 {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {editing ? 'Update' : 'Save'}
               </Button>

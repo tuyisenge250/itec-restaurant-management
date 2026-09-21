@@ -50,7 +50,7 @@ export type OrderAuditLogEntry = {
 }
 export type OrderAuditLog = { auditLog: OrderAuditLogEntry[]; stockReversedItemIds: string[] }
 
-export type OrderFilters = { status?: string; table?: string; waiterId?: string; from?: string; to?: string; view?: 'kitchen' }
+export type OrderFilters = { status?: string; table?: string; waiterId?: string; from?: string; to?: string; view?: 'kitchen' | 'cashier' }
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>
 export type UpdateOrderItemsInput = z.infer<typeof updateOrderItemsSchema>

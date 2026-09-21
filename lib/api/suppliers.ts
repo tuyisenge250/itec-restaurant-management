@@ -6,11 +6,27 @@ import { createSupplierSchema } from '@/lib/validation/purchase-order.schema'
 
 export type Supplier = {
   id: string; name: string; phone: string | null; email: string | null
-  address: string | null; isActive: boolean; createdAt: string
+  address: string | null; paymentTerms: string | null; isActive: boolean; createdAt: string
 }
 export type CreateSupplierInput = z.infer<typeof createSupplierSchema>
 
+export type SupplierHistoryOrder = {
+  id: string
+  status: 'draft' | 'pending_approval' | 'ordered' | 'partially_received' | 'received' | 'cancelled'
+  createdAt: string
+  orderedValue: number
+  receivedValue: number
+  paidValue: number
+  owed: number
+}
+export type SupplierHistory = {
+  supplier: { id: string; name: string; paymentTerms: string | null }
+  orders: SupplierHistoryOrder[]
+  totals: { orderedValue: number; receivedValue: number; paidValue: number; owed: number }
+}
+
 export const getSuppliers = () => apiFetch<Supplier[]>('/api/suppliers')
+export const getSupplierHistory = (id: string) => apiFetch<SupplierHistory>(`/api/suppliers/${id}/history`)
 export const createSupplier = (data: CreateSupplierInput) =>
   apiFetch<Supplier>('/api/suppliers', { method: 'POST', body: JSON.stringify(data) })
 export const updateSupplier = (id: string, data: Partial<CreateSupplierInput & { isActive: boolean }>) =>
@@ -20,6 +36,13 @@ export const deleteSupplier = (id: string) =>
 
 export function useSuppliers() {
   return useQuery({ queryKey: ['suppliers'], queryFn: getSuppliers })
+}
+export function useSupplierHistory(id: string | undefined) {
+  return useQuery({
+    queryKey: ['suppliers', id, 'history'],
+    queryFn: () => getSupplierHistory(id!),
+    enabled: !!id,
+  })
 }
 export function useCreateSupplier() {
   const qc = useQueryClient()

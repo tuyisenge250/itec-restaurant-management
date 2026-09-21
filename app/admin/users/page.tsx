@@ -23,13 +23,13 @@ const createSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(6),
-  role: z.enum(['admin', 'kitchen', 'waiter']),
+  role: z.enum(['admin', 'kitchen', 'waiter', 'cashier']),
 })
 const editSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(6).or(z.literal('')).optional(),
-  role: z.enum(['admin', 'kitchen', 'waiter']),
+  role: z.enum(['admin', 'kitchen', 'waiter', 'cashier']),
 })
 type CreateFormValues = z.infer<typeof createSchema>
 type EditFormValues = z.infer<typeof editSchema>
@@ -38,6 +38,7 @@ const roleBadge: Record<string, string> = {
   admin:   'bg-primary text-primary-foreground',
   kitchen: 'bg-warning text-warning-foreground',
   waiter:  'bg-secondary text-secondary-foreground',
+  cashier: 'bg-success text-success-foreground',
 }
 
 export default function UsersPage() {
@@ -160,7 +161,7 @@ export default function UsersPage() {
             <div className="flex flex-col gap-1.5">
               <Label>Role</Label>
               <Select
-                items={{ admin: 'Admin', kitchen: 'Kitchen', waiter: 'Waiter' }}
+                items={{ admin: 'Admin', kitchen: 'Kitchen', waiter: 'Waiter', cashier: 'Cashier' }}
                 defaultValue={editing?.role}
                 onValueChange={(v) => setValue('role', v as CreateFormValues['role'])}
               >
@@ -169,6 +170,7 @@ export default function UsersPage() {
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="kitchen">Kitchen</SelectItem>
                   <SelectItem value="waiter">Waiter</SelectItem>
+                  <SelectItem value="cashier">Cashier</SelectItem>
                 </SelectContent>
               </Select>
               {errors.role && <p className="text-xs text-destructive">{errors.role.message}</p>}

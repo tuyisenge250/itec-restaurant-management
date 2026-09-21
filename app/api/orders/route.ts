@@ -22,14 +22,16 @@ export async function POST(req: NextRequest) {
 }
 
 // Admin's order-operations page passes filters (status/table/waiter/date
-// range) and sees every order. Kitchen needs every order too, to fulfill
-// any table's tickets. A waiter gets none of that — they see only orders
-// they personally created, force-scoped here (not client-side) so there's
-// no way to see another waiter's ticket by requesting this endpoint
-// directly, regardless of what the UI shows.
+// range) and sees every order. Kitchen and cashier need every order too —
+// kitchen to fulfill any table's prep tickets, cashier for the same reason
+// over direct-serve items plus its broader oversight role. A waiter gets
+// none of that — they see only orders they personally created, force-
+// scoped here (not client-side) so there's no way to see another waiter's
+// ticket by requesting this endpoint directly, regardless of what the UI
+// shows.
 export async function GET(req: NextRequest) {
   try {
-    const user = await requireRole('admin', 'kitchen', 'waiter')
+    const user = await requireRole('admin', 'kitchen', 'waiter', 'cashier')
     const { searchParams } = req.nextUrl
     const statusParam = searchParams.get('status')
     const status = ORDER_STATUSES.find((s) => s === statusParam)
@@ -37,16 +39,22 @@ export async function GET(req: NextRequest) {
     const waiterId = user.role === 'waiter' ? user.sub : searchParams.get('waiterId') || undefined
     const from = searchParams.get('from')
     const to = searchParams.get('to')
-    // The kitchen board must never see direct-serve items or orders made up
-    // of nothing else — scoped server-side, not filtered client-side, same
-    // reasoning as the waiter scoping above.
-    const kitchenView = searchParams.get('view') === 'kitchen'
+    // The kitchen/cashier boards must never see the other's item type (or
+    // orders made up of nothing else) — scoped server-side, not filtered
+    // client-side, same reasoning as the waiter scoping above.
+    const view = searchParams.get('view')
+    const kitchenView = view === 'kitchen'
+    const cashierView = view === 'cashier'
 
     const where: Prisma.OrderWhereInput = {
       status,
       table: table ? { contains: table, mode: 'insensitive' } : undefined,
       createdById: waiterId,
-      items: kitchenView ? { some: { requiresPreparation: true } } : undefined,
+      items: kitchenView
+        ? { some: { requiresPreparation: true } }
+        : cashierView
+          ? { some: { requiresPreparation: false } }
+          : undefined,
     }
     if (from || to) {
       where.createdAt = { gte: from ? new Date(from) : undefined, lte: to ? parseUpperBoundDate(to) : undefined }
@@ -71,7 +79,9 @@ export async function GET(req: NextRequest) {
 
     const result = kitchenView
       ? orders.map((o) => ({ ...o, items: o.items.filter((i) => i.requiresPreparation) }))
-      : orders
+      : cashierView
+        ? orders.map((o) => ({ ...o, items: o.items.filter((i) => !i.requiresPreparation) }))
+        : orders
 
     return NextResponse.json(result)
   } catch (err) {

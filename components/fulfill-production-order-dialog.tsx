@@ -23,8 +23,10 @@ import { rwf } from '@/lib/utils'
 //   there's nothing to check here, just a readout of what was already
 //   reserved, plus a service-fee field. Always shown regardless of
 //   `showStockCheck`/`simplified`, since only admin ever sees this case.
-// `simplified` hides the costing-method picker (defaults to FIFO silently)
-// — a back-office call, not a kitchen/waiter one.
+// `simplified` hides the costing-method picker (defaults to FIFO silently),
+// labor cost (reference-only, never folded into unit cost — tracked as a
+// period Expense instead) and expiry date — all back-office concerns, not a
+// kitchen/waiter one; they just report what actually came out.
 export function FulfillProductionOrderDialog({
   order, onClose, showStockCheck, simplified,
 }: {
@@ -129,10 +131,12 @@ export function FulfillProductionOrderDialog({
                 <Input type="number" step="0.01" placeholder="0.00" value={outsideCost} onChange={(e) => setOutsideCost(e.target.value)} />
               </div>
             ) : (
-              <div className="flex flex-col gap-1.5">
-                <Label>Labor cost <span className="text-muted-foreground">(reference only — not folded into unit cost)</span></Label>
-                <Input type="number" step="0.01" value={laborCost} onChange={(e) => setLaborCost(e.target.value)} />
-              </div>
+              !simplified && (
+                <div className="flex flex-col gap-1.5">
+                  <Label>Labor cost <span className="text-muted-foreground">(reference only — not folded into unit cost)</span></Label>
+                  <Input type="number" step="0.01" value={laborCost} onChange={(e) => setLaborCost(e.target.value)} />
+                </div>
+              )
             )}
             {!simplified && (
               <div className="flex flex-col gap-1.5">
@@ -146,10 +150,12 @@ export function FulfillProductionOrderDialog({
                 </Select>
               </div>
             )}
-            <div className="flex flex-col gap-1.5">
-              <Label>Expires <span className="text-muted-foreground">(optional)</span></Label>
-              <Input type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
-            </div>
+            {!simplified && (
+              <div className="flex flex-col gap-1.5">
+                <Label>Expires <span className="text-muted-foreground">(optional)</span></Label>
+                <Input type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+              </div>
+            )}
           </div>
         )}
         <DialogFooter>

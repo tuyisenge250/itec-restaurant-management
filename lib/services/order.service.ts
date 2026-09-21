@@ -102,10 +102,13 @@ async function assertItemsServable(tx: TxClient, items: OrderItemInput[]) {
 
 /**
  * Creates an order after checking every line against current ingredient
- * stock (never silently accepting and failing later at fulfillment), and
- * rejects a second concurrent order on a table that already has one open.
- * Each line snapshots the menu item's requiresPreparation flag so a later
- * menu edit never retroactively changes how an already-placed line behaves.
+ * stock (never silently accepting and failing later at fulfillment). A
+ * table can carry more than one open order at once — a second round
+ * ordered before the first is paid, or a split bill — the same situation
+ * `splitOrder` already produces deliberately, with `mergeOrders` there to
+ * consolidate them back if needed. Each line snapshots the menu item's
+ * requiresPreparation flag so a later menu edit never retroactively
+ * changes how an already-placed line behaves.
  */
 export async function createOrder(params: {
   table: string
@@ -115,13 +118,6 @@ export async function createOrder(params: {
   const { table, items, createdById } = params
 
   return prisma.$transaction(async (tx) => {
-    const openOrder = await tx.order.findFirst({
-      where: { table, status: { notIn: ['paid', 'cancelled'] } },
-    })
-    if (openOrder) {
-      throw new ConflictError(`Table ${table} already has an open order`)
-    }
-
     const menuItems = await assertItemsServable(tx, items)
 
     const snapshotItems = items.map((item) => {
@@ -162,12 +158,14 @@ export async function createOrder(params: {
  * Adds/removes lines. Adding is always allowed (until the order is
  * paid/cancelled) — a waiter can add a Coke to a table whose grilled
  * chicken is already preparing. Removing is checked per line: a prep item
- * locks once it's been sent to the kitchen (sentToKitchenAt set), a
- * direct-serve item locks once it's been served. A new prep item added to
- * an order the kitchen has already claimed joins the kitchen queue
- * immediately (auto-sent) rather than waiting for a claim that already
- * happened; one added before any claim waits for the next claim like
- * everything else.
+ * locks once it's been sent to the kitchen (sentToKitchenAt set); a
+ * direct-serve item locks the moment it leaves 'pending' — i.e. once
+ * cashier has confirmed it and its stock is already deducted, same as a
+ * prep item locking at the kitchen-ticket stage rather than waiting for
+ * 'served'. A new prep item added to an order the kitchen has already
+ * claimed joins the kitchen queue immediately (auto-sent) rather than
+ * waiting for a claim that already happened; one added before any claim
+ * waits for the next claim like everything else.
  */
 export async function updateOrderItems(params: {
   orderId: string
@@ -192,12 +190,12 @@ export async function updateOrderItems(params: {
       for (const itemId of removeItemIds) {
         const item = order.items.find((i) => i.id === itemId)
         if (!item) throw new NotFoundError(`Order item ${itemId} not found on this order`)
-        const locked = item.requiresPreparation ? item.sentToKitchenAt !== null : item.status === 'served'
+        const locked = item.requiresPreparation ? item.sentToKitchenAt !== null : item.status !== 'pending'
         if (locked) {
           throw new BusinessRuleError(
             item.requiresPreparation
               ? 'Cannot remove an item that has already been sent to the kitchen'
-              : 'Cannot remove an item that has already been served'
+              : 'Cannot remove an item that has already been confirmed by cashier'
           )
         }
       }
@@ -316,16 +314,18 @@ export async function updateOrderStatus(params: {
 }
 
 /**
- * Kitchen (or the admin/kitchen user who claimed the order) marks ONE prep
- * item ready — this is where stock actually leaves the shelf for that item,
- * re-validated under lock since it may have moved since the order was
- * created or claimed.
+ * Marks ONE item ready — this is where stock actually leaves the shelf for
+ * that item, re-validated under lock since it may have moved since the
+ * order was created or claimed. Two independent fulfillment paths land
+ * here: kitchen confirms a prep item once it's been claimed and is
+ * 'preparing'; cashier confirms a direct-serve item straight off 'pending'
+ * (no claim/kitchen-ticket concept for those — it's a single checkpoint,
+ * not a cook queue). Either way the waiter still does the final 'served'
+ * hand-off — see serveOrderItem — so no item is ever fulfilled by the same
+ * person who's about to hand it to the customer.
  */
 export async function markOrderItemReady(params: { orderItemId: string; userId: string; role: string }) {
   const { orderItemId, userId, role } = params
-  if (role !== 'admin' && role !== 'kitchen') {
-    throw new ForbiddenError('Only kitchen or admin can mark an item ready')
-  }
 
   return prisma.$transaction(async (tx) => {
     const item = await tx.orderItem.findUnique({
@@ -333,14 +333,24 @@ export async function markOrderItemReady(params: { orderItemId: string; userId: 
       include: { order: true, menuItem: { include: { recipeItems: true } } },
     })
     if (!item) throw new NotFoundError('Order item not found')
-    if (!item.requiresPreparation) {
-      throw new BusinessRuleError('This item does not go through the kitchen')
-    }
-    if (role === 'kitchen' && item.order.startedById && item.order.startedById !== userId) {
-      throw new ForbiddenError('This order is already being handled by another kitchen user')
-    }
-    if (item.status !== 'preparing') {
-      throw new BusinessRuleError(`Cannot mark ready an item in status ${item.status}`)
+
+    if (item.requiresPreparation) {
+      if (role !== 'admin' && role !== 'kitchen') {
+        throw new ForbiddenError('Only kitchen or admin can mark a kitchen item ready')
+      }
+      if (role === 'kitchen' && item.order.startedById && item.order.startedById !== userId) {
+        throw new ForbiddenError('This order is already being handled by another kitchen user')
+      }
+      if (item.status !== 'preparing') {
+        throw new BusinessRuleError(`Cannot mark ready an item in status ${item.status}`)
+      }
+    } else {
+      if (role !== 'admin' && role !== 'cashier') {
+        throw new ForbiddenError('Only cashier or admin can mark a direct-serve item ready')
+      }
+      if (item.status !== 'pending') {
+        throw new BusinessRuleError(`Cannot mark ready an item in status ${item.status}`)
+      }
     }
 
     let ingredientCost = 0
@@ -377,13 +387,12 @@ export async function markOrderItemReady(params: { orderItemId: string; userId: 
 }
 
 /**
- * Hands an item to the customer. For a direct-serve item this is the whole
- * fulfillment step in one tap — no kitchen ticket ever existed, so stock is
- * drawn right here, at serve, the same moment the item leaves the building
- * (matching how kitchen items already deduct at fulfillment rather than at
- * order creation). For a prep item, stock already left at the 'ready' step;
- * this just marks it handed over. Waiter-only (their own order) or admin —
- * kitchen never touches this, whether the item went through them or not.
+ * Hands an item to the customer — the final step for every item, prep or
+ * direct-serve alike. Stock already left the shelf at the 'ready' step
+ * (kitchen for prep items, cashier for direct-serve ones — see
+ * markOrderItemReady), so this is purely the "it's in the customer's
+ * hands" record, never a stock-consuming action itself. Waiter-only (their
+ * own order) or admin.
  */
 export async function serveOrderItem(params: { orderItemId: string; userId: string; role: string }) {
   const { orderItemId, userId, role } = params
@@ -394,53 +403,18 @@ export async function serveOrderItem(params: { orderItemId: string; userId: stri
   return prisma.$transaction(async (tx) => {
     const item = await tx.orderItem.findUnique({
       where: { id: orderItemId },
-      include: { order: true, menuItem: { include: { recipeItems: true } } },
+      include: { order: true },
     })
     if (!item) throw new NotFoundError('Order item not found')
     if (role === 'waiter' && item.order.createdById !== userId) {
       throw new ForbiddenError('Only the order\'s own waiter or an admin can serve its items')
     }
-
-    if (item.requiresPreparation) {
-      if (item.status !== 'ready') {
-        throw new BusinessRuleError(`Cannot serve a kitchen item in status ${item.status} — it isn't ready yet`)
-      }
-      const updated = await tx.orderItem.update({ where: { id: orderItemId }, data: { status: 'served' } })
-      await syncOrderStatus(tx, item.orderId)
-      await writeAuditLog(tx, {
-        userId,
-        action: 'order_item.served',
-        entityType: 'OrderItem',
-        entityId: orderItemId,
-        beforeData: { status: item.status },
-        afterData: { status: updated.status },
-      })
-      return updated
+    if (item.status !== 'ready') {
+      throw new BusinessRuleError(`Cannot serve an item in status ${item.status} — it isn't ready yet`)
     }
 
-    if (item.status !== 'pending') {
-      throw new BusinessRuleError(`Cannot serve a direct-serve item in status ${item.status}`)
-    }
-
-    let ingredientCost = 0
-    for (const recipeItem of item.menuItem.recipeItems) {
-      const { totalCost } = await consumeStock(tx, {
-        inventoryItemId: recipeItem.inventoryItemId,
-        quantity: recipeItem.quantity * item.quantity,
-        source: 'sale',
-        referenceId: item.id,
-        recordedById: userId,
-      })
-      ingredientCost += totalCost
-    }
-    const costPerUnit = ingredientCost / item.quantity + item.menuItem.preparationCost
-
-    const updated = await tx.orderItem.update({
-      where: { id: orderItemId },
-      data: { status: 'served', costAtSale: costPerUnit },
-    })
+    const updated = await tx.orderItem.update({ where: { id: orderItemId }, data: { status: 'served' } })
     await syncOrderStatus(tx, item.orderId)
-
     await writeAuditLog(tx, {
       userId,
       action: 'order_item.served',
@@ -449,20 +423,19 @@ export async function serveOrderItem(params: { orderItemId: string; userId: stri
       beforeData: { status: item.status },
       afterData: { status: updated.status },
     })
-
     return updated
   })
 }
 
 /**
- * Voids an item. Prep items: kitchen/admin only, once it's passed pending
- * (sentToKitchenAt set) — unchanged rule, just checked per item instead of
- * via whole-order status. Direct-serve items: waiter (their own order) or
- * admin, only once already served (stock already deducted) — a pending
- * direct-serve item is simply removed via updateOrderItems instead, since
- * nothing's been drawn from stock yet. Either way this is an immediate
- * reversal with a required reason — no cap, no approval queue, mirroring
- * how this already worked for kitchen-side voids.
+ * Voids an item. Both paths now mirror each other exactly: whoever
+ * confirms fulfillment is also who can undo it. Prep items: kitchen/admin
+ * only, once it's passed pending (sentToKitchenAt set). Direct-serve
+ * items: cashier/admin only, once cashier has confirmed it ('ready' or
+ * 'served') — a still-pending direct-serve item (nothing drawn from stock
+ * yet, cashier hasn't touched it) is simply removed via updateOrderItems
+ * instead. Either way this is an immediate reversal with a required
+ * reason — no cap, no approval queue.
  */
 export async function voidOrderItem(params: {
   orderItemId: string
@@ -492,16 +465,14 @@ export async function voidOrderItem(params: {
       // Stock only actually leaves the shelf once a prep item reaches 'ready'.
       stockAlreadyDeducted = orderItem.status === 'ready' || orderItem.status === 'served'
     } else {
-      if (role !== 'admin' && role !== 'waiter') {
-        throw new ForbiddenError('Only a waiter or admin can void a direct-serve item')
+      if (role !== 'admin' && role !== 'cashier') {
+        throw new ForbiddenError('Only cashier or admin can void a direct-serve item')
       }
-      if (role === 'waiter' && orderItem.order.createdById !== userId) {
-        throw new ForbiddenError('Only the order\'s own waiter or an admin can void its items')
+      if (orderItem.status === 'pending') {
+        throw new BusinessRuleError('Cannot void a direct-serve item that has not been confirmed yet — remove it instead')
       }
-      if (orderItem.status !== 'served') {
-        throw new BusinessRuleError('A direct-serve item that has not been served yet should be removed, not voided')
-      }
-      stockAlreadyDeducted = true
+      // Stock only actually leaves the shelf once cashier confirms it ('ready').
+      stockAlreadyDeducted = orderItem.status === 'ready' || orderItem.status === 'served'
     }
 
     if (stockAlreadyDeducted) {
@@ -695,14 +666,17 @@ export async function applyDiscount(params: {
   discountAmount?: number
   discountReason?: string
   userId: string
-  role: 'admin' | 'kitchen' | 'waiter'
+  role: 'admin' | 'kitchen' | 'waiter' | 'cashier'
 }) {
   const { orderId, discountPercent, discountAmount, discountReason, userId, role } = params
 
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } })
     if (!order) throw new NotFoundError('Order not found')
-    if (role !== 'admin' && order.createdById !== userId) {
+    // Only waiter is scoped to their own orders — admin and cashier (its
+    // oversight extends to every order, not just ones they created) can
+    // discount anything, just capped lower than admin by DISCOUNT_CAPS.
+    if (role === 'waiter' && order.createdById !== userId) {
       throw new ForbiddenError('Only the order\'s own waiter or an admin can apply a discount')
     }
     if (order.status === 'paid' || order.status === 'cancelled') {

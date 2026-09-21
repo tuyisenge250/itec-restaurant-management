@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, CreditCard, Plus, Minus, X, Split, Merge, Percent, Ban, ChefHat, Zap, Check, Undo2 } from 'lucide-react'
+import { ArrowLeft, Plus, Minus, X, Split, Merge, Percent, Ban, ChefHat, Zap, Check } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { Button } from '@/components/ui/button'
@@ -20,10 +20,9 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   useOrder, useOrders, useUpdateOrderItems,
-  useSplitOrder, useMergeOrder, useApplyOrderDiscount, useUpdateOrderStatus, useServeOrderItem, useVoidOrderItem,
+  useSplitOrder, useMergeOrder, useApplyOrderDiscount, useUpdateOrderStatus, useServeOrderItem,
   type Order,
 } from '@/lib/api/orders'
-import { Textarea } from '@/components/ui/textarea'
 import { useMenu } from '@/lib/api/menu'
 import { useCurrentUser } from '@/lib/api/auth'
 import { DISCOUNT_CAPS } from '@/lib/rbac'
@@ -31,24 +30,19 @@ import { computeKitchenInfo, formatDuration } from '@/lib/kitchen-timing'
 import { rwf } from '@/lib/utils'
 
 // A prep item locks once it's been sent to the kitchen; a direct-serve item
-// locks once it's been served — either way it can no longer be edited or
-// removed from the waiter side, only voided (kitchen) or reversed (waiter).
+// locks the moment cashier has confirmed it (stock already drawn) — either
+// way it can no longer be edited or removed from the waiter side, only
+// voided by whoever fulfilled it (kitchen or cashier).
 function isItemLocked(item: Order['items'][number]) {
-  return item.requiresPreparation ? item.sentToKitchenAt !== null : item.status === 'served'
+  return item.requiresPreparation ? item.sentToKitchenAt !== null : item.status !== 'pending'
 }
 
-// A direct-serve item is servable the moment it's added; a prep item only
-// once the kitchen has marked it ready.
+// Every item — prep or direct-serve — is servable only once it's 'ready':
+// kitchen confirms a prep item, cashier confirms a direct-serve one. The
+// waiter is never the one who fulfills an item, only the one who hands it
+// over once someone else has.
 function isItemServable(item: Order['items'][number]) {
-  return item.requiresPreparation ? item.status === 'ready' : item.status === 'pending'
-}
-
-// Stock was drawn the moment a direct-serve item was served, so reversing it
-// after the fact (wrong order, customer changed their mind) is a waiter
-// action here — a required reason, immediate reversal, no cap/approval
-// queue. A prep item already served is still kitchen/admin's to void.
-function isWaiterVoidable(item: Order['items'][number]) {
-  return !item.requiresPreparation && item.status === 'served'
+  return item.status === 'ready'
 }
 
 export default function OrderDetailPage() {
@@ -64,7 +58,6 @@ export default function OrderDetailPage() {
   const applyDiscount = useApplyOrderDiscount()
   const updateStatus = useUpdateOrderStatus()
   const serveItem = useServeOrderItem()
-  const voidItem = useVoidOrderItem()
 
   const [addMenuItemId, setAddMenuItemId] = useState('')
   const [splitOpen, setSplitOpen] = useState(false)
@@ -75,8 +68,6 @@ export default function OrderDetailPage() {
   const [discountPercent, setDiscountPercent] = useState('')
   const [discountReason, setDiscountReason] = useState('')
   const [cancelOpen, setCancelOpen] = useState(false)
-  const [voidTarget, setVoidTarget] = useState<{ orderItemId: string; name: string } | null>(null)
-  const [voidReason, setVoidReason] = useState('')
 
   if (isLoading) return (
     <div className="flex flex-col gap-4">
@@ -161,14 +152,6 @@ export default function OrderDetailPage() {
     setCancelOpen(false)
   }
 
-  function confirmVoid() {
-    if (!voidTarget || !voidReason.trim()) return
-    voidItem.mutate(
-      { orderItemId: voidTarget.orderItemId, data: { voidReason } },
-      { onSuccess: () => { setVoidTarget(null); setVoidReason('') } }
-    )
-  }
-
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6">
       <div className="flex items-center gap-3">
@@ -232,15 +215,6 @@ export default function OrderDetailPage() {
                     >
                       <Check className="mr-1 h-3.5 w-3.5" />Serve
                     </Button>
-                  )}
-                  {isWaiterVoidable(item) && (
-                    <button
-                      onClick={() => setVoidTarget({ orderItemId: item.id, name: item.menuItem.name })}
-                      className="text-muted-foreground hover:text-destructive"
-                      aria-label="Void item"
-                    >
-                      <Undo2 className="h-3.5 w-3.5" />
-                    </button>
                   )}
                   {!locked && !item.isVoided && (
                     <button onClick={() => handleRemoveItem(item.id)} className="text-muted-foreground hover:text-destructive">
@@ -331,11 +305,6 @@ export default function OrderDetailPage() {
             </Button>
           </>
         )}
-        {(order.status === 'ready' || order.status === 'served') && (
-          <Link href={`/waiter/payments/${order.id}`} className="col-span-2">
-            <Button className="w-full"><CreditCard className="mr-2 h-4 w-4" />Record payment</Button>
-          </Link>
-        )}
         {isPending && (
           <Button variant="destructive" className="col-span-2" onClick={() => setCancelOpen(true)}>
             <Ban className="mr-2 h-4 w-4" />Cancel order
@@ -355,29 +324,6 @@ export default function OrderDetailPage() {
             <AlertDialogCancel>Keep order</AlertDialogCancel>
             <Button variant="destructive" disabled={updateStatus.isPending} onClick={handleCancel}>
               Cancel order
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={!!voidTarget} onOpenChange={(o) => { if (!o) { setVoidTarget(null); setVoidReason('') } }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Void {voidTarget?.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This item was already served and its stock deducted — voiding it credits that stock back
-              immediately. A reason is required.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <Textarea
-            placeholder="Reason (e.g. wrong order, customer changed their mind)"
-            value={voidReason}
-            onChange={(e) => setVoidReason(e.target.value)}
-          />
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button variant="destructive" disabled={!voidReason.trim() || voidItem.isPending} onClick={confirmVoid}>
-              Void item
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

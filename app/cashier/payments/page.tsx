@@ -12,13 +12,13 @@ import { Button } from '@/components/ui/button'
 import { useOrders } from '@/lib/api/orders'
 import { rwf } from '@/lib/utils'
 
-export default function PaymentsIndexPage() {
+export default function CashierPaymentsPage() {
   const { data: orders = [], isLoading } = useOrders()
   const payable = orders.filter((o) => o.status === 'ready' || o.status === 'served')
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Payments" description="Orders ready to be paid" />
+      <PageHeader title="Payments" description="Orders ready to be paid, across every waiter" />
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -32,6 +32,7 @@ export default function PaymentsIndexPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Table</TableHead>
+                  <TableHead>Waiter</TableHead>
                   <TableHead>Items</TableHead>
                   <TableHead>Total</TableHead>
                   <TableHead>Status</TableHead>
@@ -44,11 +45,12 @@ export default function PaymentsIndexPage() {
                   return (
                     <TableRow key={o.id} className="hover:bg-accent">
                       <TableCell className="font-medium">{o.table}</TableCell>
+                      <TableCell className="text-muted-foreground">{o.createdBy.name}</TableCell>
                       <TableCell>{o.items.length}</TableCell>
                       <TableCell>{rwf(total)}</TableCell>
                       <TableCell><StatusBadge status={o.status} /></TableCell>
                       <TableCell className="text-right">
-                        <Link href={`/waiter/payments/${o.id}`}>
+                        <Link href={`/cashier/payments/${o.id}`}>
                           <Button size="sm">Record payment</Button>
                         </Link>
                       </TableCell>

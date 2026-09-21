@@ -24,7 +24,7 @@ const METHODS: { value: CreatePaymentInput['method']; label: string }[] = [
   { value: 'other', label: 'Other' },
 ]
 
-export default function PaymentPage() {
+export default function CashierPaymentPage() {
   const { orderId } = useParams<{ orderId: string }>()
   const router = useRouter()
   const { data: order, isLoading } = useOrder(orderId)
@@ -79,7 +79,7 @@ export default function PaymentPage() {
     <div className="mx-auto flex max-w-lg flex-col gap-6">
       <PageHeader
         title="Payment"
-        description={`Table ${order.table} · Order #${order.id.slice(0, 8)}`}
+        description={`Table ${order.table} · Order #${order.id.slice(0, 8)} · Waiter ${order.createdBy.name}`}
       />
 
       <Card>
@@ -191,7 +191,7 @@ export default function PaymentPage() {
             ))}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => router.push('/waiter/payments')}>Close</Button>
+            <Button variant="outline" onClick={() => router.push('/cashier/payments')}>Close</Button>
             <Button onClick={() => window.print()}><Printer className="mr-2 h-4 w-4" />Print</Button>
           </DialogFooter>
         </DialogContent>
