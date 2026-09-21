@@ -21,7 +21,7 @@ import { DateRangePicker } from '@/components/date-range-picker'
 import { useOrders, useOrder, useOrderAuditLog, useUpdateOrderStatus, type Order, type OrderStatus } from '@/lib/api/orders'
 import { useUsers } from '@/lib/api/users'
 import { computeKitchenInfo, formatDuration } from '@/lib/kitchen-timing'
-import { rwf } from '@/lib/utils'
+import { rwf, menuItemLabel } from '@/lib/utils'
 
 const STATUS_OPTIONS: OrderStatus[] = ['pending', 'preparing', 'ready', 'served', 'paid', 'cancelled']
 
@@ -128,7 +128,9 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: string | null; onClo
                 <TableBody>
                   {(order.items ?? []).map((item) => (
                     <TableRow key={item.id} className={item.isVoided ? 'opacity-60' : undefined}>
-                      <TableCell className={item.isVoided ? 'line-through' : undefined}>{item.menuItem?.name ?? 'Unknown item'}</TableCell>
+                      <TableCell className={item.isVoided ? 'line-through' : undefined}>
+                        {item.menuItem ? menuItemLabel(item.menuItem.name, item.menuItem.variantLabel) : 'Unknown item'}
+                      </TableCell>
                       <TableCell className="text-right">{item.quantity}</TableCell>
                       <TableCell className="text-right">{rwf(item.priceAtSale)}</TableCell>
                       <TableCell className="text-right">{rwf(item.costAtSale)}</TableCell>

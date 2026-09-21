@@ -17,7 +17,7 @@ import { useCreateOrder } from '@/lib/api/orders'
 import { useTables } from '@/lib/api/tables'
 import { rwf } from '@/lib/utils'
 
-type OrderLine = { id: string; name: string; price: number; qty: number }
+type OrderLine = { id: string; name: string; variantLabel: string | null; price: number; qty: number }
 
 export default function NewOrderPage() {
   const router = useRouter()
@@ -32,7 +32,7 @@ export default function NewOrderPage() {
 
   const NEW_TABLE_OPTION = '__new__'
 
-  function addItem(item: { id: string; name: string; price: number }) {
+  function addItem(item: { id: string; name: string; variantLabel: string | null; price: number }) {
     setError('')
     setLines((prev) => {
       const existing = prev.find((l) => l.id === item.id)
@@ -94,7 +94,9 @@ export default function NewOrderPage() {
                     <Card key={item.id} className="cursor-pointer hover:bg-accent transition-colors" onClick={() => addItem(item)}>
                       <CardContent className="flex items-center justify-between p-4">
                         <div>
-                          <p className="font-medium text-foreground">{item.name}</p>
+                          <p className="font-medium text-foreground">
+                            {item.name}{item.variantLabel && <span className="font-normal text-muted-foreground"> · {item.variantLabel}</span>}
+                          </p>
                           <p className="flex items-center gap-1 text-sm text-muted-foreground">
                             {rwf(item.price)}
                             {item.requiresPreparation
@@ -180,7 +182,9 @@ export default function NewOrderPage() {
           <div className="flex flex-1 flex-col gap-2 overflow-auto">
             {lines.map((line) => (
               <div key={line.id} className="flex items-center justify-between gap-2">
-                <span className="flex-1 truncate text-sm text-foreground">{line.name}</span>
+                <span className="flex-1 truncate text-sm text-foreground">
+                  {line.name}{line.variantLabel && <span className="text-muted-foreground"> · {line.variantLabel}</span>}
+                </span>
                 <div className="flex items-center gap-1">
                   <button onClick={() => changeQty(line.id, -1)} className="flex h-6 w-6 items-center justify-center rounded border border-border hover:bg-accent">
                     <Minus className="h-3 w-3" />

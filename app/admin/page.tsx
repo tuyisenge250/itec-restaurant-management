@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ProfitByItemChart } from '@/components/profit-by-item-chart'
 import { useOrders } from '@/lib/api/orders'
 import { useInventory } from '@/lib/api/inventory'
-import { rwf } from '@/lib/utils'
+import { rwf, menuItemLabel } from '@/lib/utils'
 
 function minutesAgo(iso: string) {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
@@ -21,7 +21,12 @@ export default function AdminDashboard() {
   const { data: inventory = [], isLoading: inventoryLoading } = useInventory()
 
   const today = new Date().toDateString()
-  const todayPaid = orders.filter((o) => o.status === 'paid' && new Date(o.updatedAt).toDateString() === today)
+  // 'payment_pending' counts as paid here too — the waiter has already
+  // collected the money and handed over a receipt, cashier's confirmation
+  // is just an internal reconciliation step, not when the sale happened.
+  const todayPaid = orders.filter(
+    (o) => ['payment_pending', 'paid'].includes(o.status) && new Date(o.updatedAt).toDateString() === today
+  )
   const soldItems = (o: (typeof orders)[number]) => o.items.filter((i) => !i.isVoided)
   const revenue = todayPaid.reduce((s, o) => s + soldItems(o).reduce((a, i) => a + i.priceAtSale * i.quantity, 0), 0)
   const profit  = todayPaid.reduce((s, o) => s + soldItems(o).reduce((a, i) => a + (i.priceAtSale - i.costAtSale) * i.quantity, 0), 0)
@@ -31,7 +36,7 @@ export default function AdminDashboard() {
   const itemProfit = new Map<string, { name: string; profit: number }>()
   for (const o of todayPaid) {
     for (const i of soldItems(o)) {
-      const existing = itemProfit.get(i.menuItemId) ?? { name: i.menuItem.name, profit: 0 }
+      const existing = itemProfit.get(i.menuItemId) ?? { name: menuItemLabel(i.menuItem.name, i.menuItem.variantLabel), profit: 0 }
       existing.profit += (i.priceAtSale - i.costAtSale) * i.quantity
       itemProfit.set(i.menuItemId, existing)
     }

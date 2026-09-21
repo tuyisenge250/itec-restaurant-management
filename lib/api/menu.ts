@@ -5,7 +5,7 @@ import type { z } from 'zod'
 import { createMenuItemSchema, updateMenuItemSchema } from '@/lib/validation/menu.schema'
 
 export type MenuItem = {
-  id: string; name: string; categoryId: string | null; category: { name: string } | null
+  id: string; name: string; variantLabel: string | null; categoryId: string | null; category: { name: string } | null
   price: number; preparationCost: number; requiresPreparation: boolean
   isAvailable: boolean; createdAt: string; updatedAt: string
   recipeItems: { inventoryItemId: string; quantity: number; inventoryItem: { name: string; currentStock: number } }[]

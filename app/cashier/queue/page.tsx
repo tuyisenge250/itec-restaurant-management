@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useOrders, useMarkOrderItemReady, useVoidOrderItem, type Order } from '@/lib/api/orders'
 import { ApiError } from '@/lib/api/client'
-import { rwf } from '@/lib/utils'
+import { rwf, menuItemLabel } from '@/lib/utils'
 
 type ColStatus = 'pending' | 'ready'
 
@@ -65,7 +65,7 @@ function OrderCard({
         <ul className="flex flex-col gap-2">
           {items.map((item) => (
             <li key={item.id} className="flex items-center justify-between text-sm">
-              <span>{item.menuItem.name} <span className="font-medium">×{item.quantity}</span> · {rwf(item.priceAtSale * item.quantity)}</span>
+              <span>{menuItemLabel(item.menuItem.name, item.menuItem.variantLabel)} <span className="font-medium">×{item.quantity}</span> · {rwf(item.priceAtSale * item.quantity)}</span>
               <div className="flex items-center gap-2">
                 {colStatus === 'pending' ? (
                   <Button size="sm" disabled={isConfirming} onClick={() => onConfirm(item.id)}>Confirm</Button>
@@ -75,7 +75,7 @@ function OrderCard({
                       <CheckCircle2 className="h-3.5 w-3.5" />Confirmed
                     </span>
                     <button
-                      onClick={() => onVoid({ orderItemId: item.id, name: item.menuItem.name })}
+                      onClick={() => onVoid({ orderItemId: item.id, name: menuItemLabel(item.menuItem.name, item.menuItem.variantLabel) })}
                       className="text-muted-foreground hover:text-destructive"
                       aria-label="Void item"
                     >

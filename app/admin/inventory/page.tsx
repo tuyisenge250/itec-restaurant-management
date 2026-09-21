@@ -395,6 +395,7 @@ export default function InventoryPage() {
   // good item.
   const [addToMenu, setAddToMenu] = useState(false)
   const [menuPrice, setMenuPrice] = useState('')
+  const [menuQuantity, setMenuQuantity] = useState('1')
   const [menuCategoryId, setMenuCategoryId] = useState<string | undefined>(undefined)
 
   const { data: items = [], isLoading } = useInventory()
@@ -409,10 +410,12 @@ export default function InventoryPage() {
     defaultValues: { itemType: 'raw' },
   })
   const itemType = watch('itemType')
+  const unit = watch('unit')
 
   function resetMenuFields() {
     setAddToMenu(false)
     setMenuPrice('')
+    setMenuQuantity('1')
     setMenuCategoryId(undefined)
   }
 
@@ -436,13 +439,21 @@ export default function InventoryPage() {
     } else {
       const created = await createMutation.mutateAsync(values)
       if (addToMenu) {
+        const quantity = parseFloat(menuQuantity) || 1
+        // Selling less than the item's full stocking unit (0.3 L of a Soda
+        // stocked by the liter) needs its own label, or two prices for "the
+        // same" item would look like a duplicate on the ordering screen.
+        // Skip the label entirely at quantity 1 — "1 bottle" adds nothing a
+        // waiter needs to see.
+        const variantLabel = quantity !== 1 ? `${quantity} ${created.unit}`.trim() : undefined
         await createMenuItemMutation.mutateAsync({
           name: created.name,
+          variantLabel,
           categoryId: menuCategoryId,
           price: parseFloat(menuPrice),
           preparationCost: 0,
           requiresPreparation: false,
-          recipe: [{ inventoryItemId: created.id, quantity: 1 }],
+          recipe: [{ inventoryItemId: created.id, quantity }],
         })
       }
     }
@@ -452,7 +463,7 @@ export default function InventoryPage() {
     setEditing(null)
   }
 
-  const canSubmitMenu = !addToMenu || (!!menuPrice && parseFloat(menuPrice) > 0)
+  const canSubmitMenu = !addToMenu || (!!menuPrice && parseFloat(menuPrice) > 0 && parseFloat(menuQuantity) > 0)
   const isPending = createMutation.isPending || updateMutation.isPending || createMenuItemMutation.isPending
   const visibleItems = typeFilter === 'all' ? items : items.filter((i) => i.itemType === typeFilter)
   const totalValue = visibleItems.reduce((s, i) => s + i.stockValue, 0)
@@ -574,13 +585,24 @@ export default function InventoryPage() {
                   <span className="flex flex-col gap-0.5">
                     <span className="text-sm font-medium text-foreground">Also add to menu</span>
                     <span className="text-xs text-muted-foreground">
-                      Ready-to-sell as-is (a Coke, Fanta, a bottled liquor) — creates a direct-serve menu item
-                      that sells this item 1-for-1, no separate recipe needed.
+                      Ready-to-sell as-is (a Coke, Fanta, a bottled liquor) — creates a direct-serve menu item.
+                      Selling less than one full unit at a time (0.3 L of a Soda stocked by the liter)? Set the
+                      quantity below and it&apos;ll get its own size label so waiters don&apos;t see two identical entries.
                     </span>
                   </span>
                 </label>
                 {addToMenu && (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Qty per sale {unit ? `(${unit})` : ''}</Label>
+                      <Input
+                        type="number" step="0.01" placeholder="1"
+                        value={menuQuantity} onChange={(e) => setMenuQuantity(e.target.value)}
+                      />
+                      {parseFloat(menuQuantity) > 0 && parseFloat(menuQuantity) !== 1 && unit && (
+                        <p className="text-xs text-muted-foreground">Labeled &ldquo;{menuQuantity} {unit}&rdquo; to waiters</p>
+                      )}
+                    </div>
                     <div className="flex flex-col gap-1.5">
                       <Label>Sell price</Label>
                       <Input

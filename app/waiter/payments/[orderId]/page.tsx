@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { CreditCard, Loader2, Printer } from 'lucide-react'
+import { CreditCard, Loader2, Printer, Clock } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,10 +12,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { useOrder } from '@/lib/api/orders'
 import { useCreatePayment, usePayments, type CreatePaymentInput } from '@/lib/api/payments'
-import { rwf } from '@/lib/utils'
+import { rwf, menuItemLabel } from '@/lib/utils'
 
 const METHODS: { value: CreatePaymentInput['method']; label: string }[] = [
   { value: 'cash', label: 'Cash' },
@@ -24,7 +25,7 @@ const METHODS: { value: CreatePaymentInput['method']; label: string }[] = [
   { value: 'other', label: 'Other' },
 ]
 
-export default function CashierPaymentPage() {
+export default function PaymentPage() {
   const { orderId } = useParams<{ orderId: string }>()
   const router = useRouter()
   const { data: order, isLoading } = useOrder(orderId)
@@ -54,12 +55,16 @@ export default function CashierPaymentPage() {
   const overpaying = amountN > remaining + 0.001
 
   const canPay = order.status === 'ready' || order.status === 'served'
-  const isPaid = order.status === 'paid'
+  // A receipt is available the moment the waiter finishes collecting
+  // payment ('payment_pending') — cashier confirming it later ('paid') is
+  // an internal reconciliation step, not something the customer waits on.
+  const paymentDone = order.status === 'payment_pending' || order.status === 'paid'
 
   async function handleSubmit() {
     setError('')
     if (overpaying) { setError(`That would overpay — remaining balance is ${rwf(remaining)}.`); return }
     if (discountN > 0 && !discountReason.trim()) { setError('A reason is required for a non-zero discount.'); return }
+    const completesPayment = amountN >= remaining - 0.01
     try {
       await createPayment.mutateAsync({
         orderId,
@@ -70,6 +75,7 @@ export default function CashierPaymentPage() {
         notes: notes || undefined,
       })
       setAmount(''); setDiscount('0'); setDiscountReason(''); setNotes('')
+      if (completesPayment) setReceiptOpen(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Payment failed.')
     }
@@ -79,7 +85,7 @@ export default function CashierPaymentPage() {
     <div className="mx-auto flex max-w-lg flex-col gap-6">
       <PageHeader
         title="Payment"
-        description={`Table ${order.table} · Order #${order.id.slice(0, 8)} · Waiter ${order.createdBy.name}`}
+        description={`Table ${order.table} · Order #${order.id.slice(0, 8)}`}
       />
 
       <Card>
@@ -87,7 +93,7 @@ export default function CashierPaymentPage() {
         <CardContent className="flex flex-col gap-2 pb-4">
           {activeItems.map((item) => (
             <div key={item.id} className="flex justify-between text-sm">
-              <span>{item.menuItem.name} <span className="text-muted-foreground">×{item.quantity}</span></span>
+              <span>{menuItemLabel(item.menuItem.name, item.menuItem.variantLabel)} <span className="text-muted-foreground">×{item.quantity}</span></span>
               <span>{rwf(item.priceAtSale * item.quantity)}</span>
             </div>
           ))}
@@ -125,8 +131,16 @@ export default function CashierPaymentPage() {
         </Card>
       )}
 
-      {isPaid ? (
-        <Button variant="outline" onClick={() => setReceiptOpen(true)}><Printer className="mr-2 h-4 w-4" />View receipt</Button>
+      {paymentDone ? (
+        <div className="flex flex-col gap-3">
+          {order.status === 'payment_pending' && (
+            <Alert>
+              <Clock />
+              <AlertDescription>Payment recorded — awaiting cashier confirmation.</AlertDescription>
+            </Alert>
+          )}
+          <Button variant="outline" onClick={() => setReceiptOpen(true)}><Printer className="mr-2 h-4 w-4" />View receipt</Button>
+        </div>
       ) : !canPay ? (
         <p className="text-sm text-muted-foreground">Order not yet served — payment isn&apos;t available yet.</p>
       ) : (
@@ -178,7 +192,7 @@ export default function CashierPaymentPage() {
           <div className="flex flex-col gap-1 text-sm">
             {activeItems.map((item) => (
               <div key={item.id} className="flex justify-between">
-                <span>{item.menuItem.name} ×{item.quantity}</span>
+                <span>{menuItemLabel(item.menuItem.name, item.menuItem.variantLabel)} ×{item.quantity}</span>
                 <span>{rwf(item.priceAtSale * item.quantity)}</span>
               </div>
             ))}
@@ -191,7 +205,7 @@ export default function CashierPaymentPage() {
             ))}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => router.push('/cashier/payments')}>Close</Button>
+            <Button variant="outline" onClick={() => router.push('/waiter/payments')}>Close</Button>
             <Button onClick={() => window.print()}><Printer className="mr-2 h-4 w-4" />Print</Button>
           </DialogFooter>
         </DialogContent>

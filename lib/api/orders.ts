@@ -12,7 +12,7 @@ import {
   voidOrderItemSchema,
 } from '@/lib/validation/order.schema'
 
-export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'paid' | 'cancelled'
+export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'payment_pending' | 'paid' | 'cancelled'
 export type OrderItemStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'voided'
 export type Order = {
   id: string; table: string; status: OrderStatus; createdById: string
@@ -29,7 +29,7 @@ export type Order = {
     preparedById: string | null; preparedAt: string | null
     preparedBy: { name: string } | null
     voidedBy: { name: string } | null
-    menuItem: { name: string }
+    menuItem: { name: string; variantLabel: string | null }
   }[]
 }
 
@@ -90,6 +90,8 @@ export const markOrderItemReady = (orderItemId: string) =>
   apiFetch<Order['items'][number]>(`/api/order-items/${orderItemId}/ready`, { method: 'POST' })
 export const serveOrderItem = (orderItemId: string) =>
   apiFetch<Order['items'][number]>(`/api/order-items/${orderItemId}/serve`, { method: 'POST' })
+export const confirmOrderPayment = (orderId: string) =>
+  apiFetch<Order>(`/api/orders/${orderId}/confirm-payment`, { method: 'POST' })
 
 export type OrderCogsBreakdown = {
   orderId: string
@@ -202,6 +204,17 @@ export function useServeOrderItem() {
       qc.invalidateQueries({ queryKey: ['orders'] })
       qc.invalidateQueries({ queryKey: ['inventory'] })
       toast.success('Item served')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+export function useConfirmOrderPayment() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: confirmOrderPayment,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      toast.success('Payment confirmed')
     },
     onError: (e: Error) => toast.error(e.message),
   })

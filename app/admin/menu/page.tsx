@@ -28,6 +28,7 @@ import { rwf } from '@/lib/utils'
 
 const itemSchema = z.object({
   name: z.string().min(1),
+  variantLabel: z.string().optional(),
   categoryId: z.string().optional(),
   price: z.coerce.number().positive(),
   preparationCost: z.coerce.number().nonnegative(),
@@ -76,7 +77,7 @@ export default function MenuPage() {
 
   function openCreate() {
     setEditingItem(null)
-    reset({ name: '', categoryId: undefined, price: 0, preparationCost: 0, requiresPreparation: true, recipe: [{ inventoryItemId: '', quantity: 0 }] })
+    reset({ name: '', variantLabel: '', categoryId: undefined, price: 0, preparationCost: 0, requiresPreparation: true, recipe: [{ inventoryItemId: '', quantity: 0 }] })
     setItemOpen(true)
   }
 
@@ -84,6 +85,7 @@ export default function MenuPage() {
     setEditingItem(item)
     reset({
       name: item.name,
+      variantLabel: item.variantLabel ?? '',
       categoryId: item.categoryId ?? undefined,
       price: item.price,
       preparationCost: item.preparationCost,
@@ -98,7 +100,7 @@ export default function MenuPage() {
       await updateMutation.mutateAsync({
         id: editingItem.id,
         data: {
-          name: values.name, categoryId: values.categoryId ?? null, price: values.price,
+          name: values.name, variantLabel: values.variantLabel || null, categoryId: values.categoryId ?? null, price: values.price,
           preparationCost: values.preparationCost, requiresPreparation: values.requiresPreparation,
         },
       })
@@ -143,7 +145,9 @@ export default function MenuPage() {
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex flex-col gap-1">
-                    <span className="font-medium text-foreground leading-tight">{item.name}</span>
+                    <span className="font-medium text-foreground leading-tight">
+                      {item.name}{item.variantLabel && <span className="font-normal text-muted-foreground"> · {item.variantLabel}</span>}
+                    </span>
                     <span className="text-xs text-muted-foreground">{item.category?.name ?? 'Uncategorized'}</span>
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       {item.requiresPreparation
@@ -183,11 +187,21 @@ export default function MenuPage() {
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingItem ? 'Edit menu item' : 'Add menu item'}</DialogTitle></DialogHeader>
           <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 py-2">
-            <div className="flex flex-col gap-1.5">
-              <Label>Name</Label>
-              <Input placeholder="Margherita Pizza" {...register('name')} />
-              {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
+            <div className="grid grid-cols-[1fr_120px] gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>Name</Label>
+                <Input placeholder="Soda" {...register('name')} />
+                {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Size <span className="text-muted-foreground">(optional)</span></Label>
+                <Input placeholder="0.3 L" {...register('variantLabel')} />
+              </div>
             </div>
+            <p className="-mt-2 text-xs text-muted-foreground">
+              Selling the same product at different sizes (e.g. Soda 0.3 L vs 0.5 L)? Give each its own price
+              and recipe quantity here, sharing the same name — the size tells them apart for the waiter.
+            </p>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
                 <Label>Category</Label>

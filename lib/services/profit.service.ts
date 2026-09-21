@@ -22,10 +22,14 @@ function orderRevenueAndCogs(order: PaidOrder) {
 }
 
 /**
- * Revenue is recognized when an order is actually paid, not when it's
- * created — every report below anchors on the order's completing payment
- * (its latest Payment.createdAt), applied consistently so numbers reconcile
- * across summary/by-item/trend.
+ * Revenue is recognized once an order has actually collected its payment
+ * in full, not when it's created — every report below anchors on the
+ * order's completing payment (its latest Payment.createdAt), applied
+ * consistently so numbers reconcile across summary/by-item/trend.
+ * 'payment_pending' counts here alongside 'paid': the money is already in
+ * hand and the customer already has a receipt the moment the waiter
+ * collects it — cashier's later confirmation is an internal reconciliation
+ * checkpoint, not the moment the sale actually happened.
  */
 async function getPaidOrdersInRange(from: Date, to: Date): Promise<PaidOrder[]> {
   const payments = await prisma.payment.findMany({
@@ -36,7 +40,7 @@ async function getPaidOrdersInRange(from: Date, to: Date): Promise<PaidOrder[]> 
   if (payments.length === 0) return []
 
   const orders = await prisma.order.findMany({
-    where: { id: { in: payments.map((p) => p.orderId) }, status: 'paid' },
+    where: { id: { in: payments.map((p) => p.orderId) }, status: { in: ['payment_pending', 'paid'] } },
     include: { items: true, payments: true },
   })
 

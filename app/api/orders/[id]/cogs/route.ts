@@ -13,7 +13,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
     const order = await prisma.order.findUniqueOrThrow({
       where: { id },
-      include: { items: { include: { menuItem: { select: { name: true } } } } },
+      include: { items: { include: { menuItem: { select: { name: true, variantLabel: true } } } } },
     })
 
     const orderItemIds = order.items.map((i) => i.id)

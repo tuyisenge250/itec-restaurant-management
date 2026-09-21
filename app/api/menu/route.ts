@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
       const created = await tx.menuItem.create({
         data: {
           name: body.name,
+          variantLabel: body.variantLabel,
           categoryId: body.categoryId,
           price: body.price,
           preparationCost: body.preparationCost,

@@ -23,7 +23,7 @@ const EPSILON = 1e-6
  */
 export function computeOrderStatus(
   items: { status: OrderItemStatus; requiresPreparation: boolean }[]
-): Exclude<OrderStatus, 'paid' | 'cancelled'> {
+): Exclude<OrderStatus, 'paid' | 'payment_pending' | 'cancelled'> {
   const active = items.filter((i) => i.status !== 'voided')
   if (active.length === 0) return 'pending'
   if (active.every((i) => i.status === 'served')) return 'served'
@@ -43,12 +43,13 @@ export function computeOrderStatus(
  * transaction as whatever just changed them — same "denormalized cache,
  * recomputed synchronously" pattern already used for
  * InventoryItem.currentStock (syncCurrentStock) and MenuItem.isAvailable
- * (recomputeAvailability). 'paid' and 'cancelled' are terminal, explicit
- * writes (payment service / cancellation) and are never recomputed here.
+ * (recomputeAvailability). 'paid', 'payment_pending', and 'cancelled' are
+ * terminal (or terminal-pending), explicit writes (payment service /
+ * cancellation) and are never recomputed here.
  */
 export async function syncOrderStatus(tx: TxClient, orderId: string) {
   const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { items: true } })
-  if (order.status === 'paid' || order.status === 'cancelled') return order
+  if (order.status === 'paid' || order.status === 'payment_pending' || order.status === 'cancelled') return order
 
   const computed = computeOrderStatus(order.items)
   if (computed === order.status) return order
@@ -182,7 +183,7 @@ export async function updateOrderItems(params: {
     if (role !== 'admin' && order.createdById !== userId) {
       throw new ForbiddenError('Only the order\'s own waiter or an admin can edit its items')
     }
-    if (order.status === 'paid' || order.status === 'cancelled') {
+    if (order.status === 'paid' || order.status === 'payment_pending' || order.status === 'cancelled') {
       throw new BusinessRuleError(`Order items can only be edited while the order is not ${order.status}`)
     }
 
@@ -536,7 +537,7 @@ export async function splitOrder(params: {
     if (role !== 'admin' && order.createdById !== userId) {
       throw new ForbiddenError('Only the order\'s own waiter or an admin can split it')
     }
-    if (order.status === 'paid' || order.status === 'cancelled') {
+    if (order.status === 'paid' || order.status === 'payment_pending' || order.status === 'cancelled') {
       throw new BusinessRuleError(`Cannot split an order in status ${order.status}`)
     }
 
@@ -631,7 +632,8 @@ export async function mergeOrders(params: {
     if (role !== 'admin' && (source.createdById !== userId || target.createdById !== userId)) {
       throw new ForbiddenError('You can only merge orders you created')
     }
-    if (source.status === 'paid' || source.status === 'cancelled' || target.status === 'paid' || target.status === 'cancelled') {
+    const closedStatuses: (typeof source.status)[] = ['paid', 'payment_pending', 'cancelled']
+    if (closedStatuses.includes(source.status) || closedStatuses.includes(target.status)) {
       throw new BusinessRuleError('Both orders must be unpaid and not cancelled to merge')
     }
     if (source.table !== target.table) {
@@ -679,7 +681,7 @@ export async function applyDiscount(params: {
     if (role === 'waiter' && order.createdById !== userId) {
       throw new ForbiddenError('Only the order\'s own waiter or an admin can apply a discount')
     }
-    if (order.status === 'paid' || order.status === 'cancelled') {
+    if (order.status === 'paid' || order.status === 'payment_pending' || order.status === 'cancelled') {
       throw new BusinessRuleError(`Cannot discount an order in status ${order.status}`)
     }
 

@@ -49,7 +49,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         ? prisma.orderItem.findMany({
             where: { id: { in: saleRefs } },
             include: {
-              menuItem: { select: { name: true } },
+              menuItem: { select: { name: true, variantLabel: true } },
               preparedBy: { select: { name: true } },
               order: { select: { id: true, table: true, status: true, createdAt: true, createdBy: { select: { name: true } } } },
             },
@@ -91,6 +91,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
               orderCreatedAt: oi.order.createdAt,
               waiterName: oi.order.createdBy.name,
               menuItemName: oi.menuItem.name,
+              menuItemVariantLabel: oi.menuItem.variantLabel,
               quantitySold: oi.quantity,
               priceAtSale: oi.priceAtSale,
               costAtSale: oi.costAtSale,

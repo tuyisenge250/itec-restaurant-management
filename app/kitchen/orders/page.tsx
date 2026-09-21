@@ -29,7 +29,7 @@ import { useRecipe } from '@/lib/api/recipes'
 import { useIngredientUsage, useInventory } from '@/lib/api/inventory'
 import { ApiError } from '@/lib/api/client'
 import { computeKitchenInfo, formatDuration } from '@/lib/kitchen-timing'
-import { rwf } from '@/lib/utils'
+import { rwf, menuItemLabel } from '@/lib/utils'
 
 type ColStatus = 'pending' | 'preparing' | 'ready'
 
@@ -64,7 +64,7 @@ function OrderItemProcedure({ item, menuInfo }: {
     <div className={`rounded-md border border-border p-3 ${item.isVoided ? 'opacity-60' : ''}`}>
       <div className="flex items-center justify-between">
         <span className={`font-medium ${item.isVoided ? 'line-through' : ''}`}>
-          {item.menuItem.name} × {item.quantity}
+          {menuItemLabel(item.menuItem.name, item.menuItem.variantLabel)} × {item.quantity}
         </span>
         {item.isVoided ? (
           <Badge variant="destructive">Voided</Badge>
@@ -264,7 +264,7 @@ export default function KitchenOrdersPage() {
                             <ul className="mb-3 flex flex-col gap-2">
                               {order.items.map((item) => (
                                 <li key={item.id} className={`flex items-center justify-between text-sm ${item.isVoided ? 'text-muted-foreground line-through' : ''}`}>
-                                  <span>{item.menuItem.name} <span className="font-medium">×{item.quantity}</span></span>
+                                  <span>{menuItemLabel(item.menuItem.name, item.menuItem.variantLabel)} <span className="font-medium">×{item.quantity}</span></span>
                                   <div className="flex items-center gap-2">
                                     {!item.isVoided && item.status === 'preparing' && (
                                       <Button
@@ -283,7 +283,7 @@ export default function KitchenOrdersPage() {
                                     )}
                                     {!item.isVoided && item.status !== 'pending' && item.status !== 'served' && !claimedByOther && (
                                       <button
-                                        onClick={() => setVoidTarget({ orderItemId: item.id, name: item.menuItem.name })}
+                                        onClick={() => setVoidTarget({ orderItemId: item.id, name: menuItemLabel(item.menuItem.name, item.menuItem.variantLabel) })}
                                         className="text-muted-foreground hover:text-destructive"
                                         aria-label="Void item"
                                       >
@@ -325,7 +325,7 @@ export default function KitchenOrdersPage() {
                 <Card key={item.id} className="cursor-pointer hover:bg-accent" onClick={() => setDetailOrder(order)}>
                   <CardContent className="flex items-center justify-between p-4 text-sm">
                     <span className="flex items-center gap-2">
-                      Table {order.table} · {item.menuItem.name} ×{item.quantity}
+                      Table {order.table} · {menuItemLabel(item.menuItem.name, item.menuItem.variantLabel)} ×{item.quantity}
                       <StatusBadge status={order.status} />
                     </span>
                     <span className="flex items-center gap-2 text-muted-foreground">

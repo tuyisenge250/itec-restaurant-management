@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/badge'
 
 type Status =
-  | 'pending' | 'preparing' | 'ready' | 'served' | 'paid' | 'cancelled'
+  | 'pending' | 'preparing' | 'ready' | 'served' | 'payment_pending' | 'paid' | 'cancelled'
   | 'draft' | 'pending_approval' | 'ordered' | 'partially_received' | 'received'
   | 'active' | 'inactive' | 'low_stock' | 'fulfilled'
 
@@ -10,6 +10,7 @@ const config: Record<Status, { label: string; className: string }> = {
   preparing:          { label: 'Preparing',          className: 'border border-warning/30 bg-warning text-warning-foreground' },
   ready:              { label: 'Ready',              className: 'border border-success/20 bg-success text-success-foreground' },
   served:             { label: 'Served',             className: 'border border-primary/10 bg-secondary text-secondary-foreground' },
+  payment_pending:    { label: 'Awaiting confirmation', className: 'border border-warning/30 bg-warning/60 text-warning-foreground' },
   paid:               { label: 'Paid',               className: 'border border-success/20 bg-success text-success-foreground' },
   cancelled:          { label: 'Cancelled',          className: 'border border-destructive/20 bg-destructive/10 text-destructive' },
   draft:              { label: 'Draft',              className: 'border border-border bg-muted text-foreground' },

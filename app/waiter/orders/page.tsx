@@ -19,7 +19,7 @@ import {
 import { useOrders, useUpdateOrderStatus, type Order } from '@/lib/api/orders'
 import { ProductionOrdersQueue } from '@/components/production-orders-queue'
 import { computeKitchenInfo, formatDuration } from '@/lib/kitchen-timing'
-import { rwf } from '@/lib/utils'
+import { rwf, menuItemLabel } from '@/lib/utils'
 
 function minutesAgo(iso: string) {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
@@ -41,7 +41,7 @@ function OrderProgressDialog({ order, onClose }: { order: Order | null; onClose:
             <div className="flex flex-col gap-1">
               {order.items.map((item) => (
                 <div key={item.id} className={`flex items-center justify-between ${item.isVoided ? 'text-muted-foreground line-through' : ''}`}>
-                  <span>{item.menuItem.name} ×{item.quantity}</span>
+                  <span>{menuItemLabel(item.menuItem.name, item.menuItem.variantLabel)} ×{item.quantity}</span>
                   <span className="text-muted-foreground">{rwf(item.priceAtSale * item.quantity)}</span>
                 </div>
               ))}
@@ -154,7 +154,7 @@ export default function WaiterOrdersPage() {
                               <Button size="sm">Pay</Button>
                             </Link>
                           )}
-                          {o.status === 'paid' && (
+                          {(o.status === 'payment_pending' || o.status === 'paid') && (
                             <Link href={`/waiter/payments/${o.id}`}>
                               <Button size="sm" variant="outline">Receipt</Button>
                             </Link>

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Plus, Minus, X, Split, Merge, Percent, Ban, ChefHat, Zap, Check } from 'lucide-react'
+import { ArrowLeft, CreditCard, Plus, Minus, X, Split, Merge, Percent, Ban, ChefHat, Zap, Check } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { Button } from '@/components/ui/button'
@@ -27,7 +27,7 @@ import { useMenu } from '@/lib/api/menu'
 import { useCurrentUser } from '@/lib/api/auth'
 import { DISCOUNT_CAPS } from '@/lib/rbac'
 import { computeKitchenInfo, formatDuration } from '@/lib/kitchen-timing'
-import { rwf } from '@/lib/utils'
+import { rwf, menuItemLabel } from '@/lib/utils'
 
 // A prep item locks once it's been sent to the kitchen; a direct-serve item
 // locks the moment cashier has confirmed it (stock already drawn) — either
@@ -86,7 +86,7 @@ export default function OrderDetailPage() {
   const { preparedByNames, sentToKitchenAt, kitchenDurationMs, inProgressMs } = computeKitchenInfo(order)
 
   const eligibleMergeTargets = allOrders.filter(
-    (o) => o.id !== order.id && o.table === order.table && !['paid', 'cancelled'].includes(o.status)
+    (o) => o.id !== order.id && o.table === order.table && !['payment_pending', 'paid', 'cancelled'].includes(o.status)
   )
 
   function setSplitQty(itemId: string, qty: number, max: number) {
@@ -181,6 +181,7 @@ export default function OrderDetailPage() {
                     ? <ChefHat className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     : <Zap className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                   {item.menuItem.name}
+                  {item.menuItem.variantLabel && <span className="text-muted-foreground"> · {item.menuItem.variantLabel}</span>}
                   {!locked ? (
                     <span className="flex items-center gap-1">
                       <button
@@ -233,7 +234,7 @@ export default function OrderDetailPage() {
             )
           })}
 
-          {order.status !== 'paid' && order.status !== 'cancelled' && (
+          {!['payment_pending', 'paid', 'cancelled'].includes(order.status) && (
             <div className="mt-2 flex gap-2">
               <Select value={addMenuItemId || null} onValueChange={(v) => setAddMenuItemId(v ?? '')}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Add another item" /></SelectTrigger>
@@ -263,7 +264,7 @@ export default function OrderDetailPage() {
         </CardContent>
       </Card>
 
-      {hasPrepItems && sentToKitchenAt && order.status !== 'paid' && order.status !== 'cancelled' && (
+      {hasPrepItems && sentToKitchenAt && !['payment_pending', 'paid', 'cancelled'].includes(order.status) && (
         <Card>
           <CardHeader className="pb-3"><CardTitle className="text-base">Kitchen</CardTitle></CardHeader>
           <CardContent className="flex flex-col gap-1.5 pb-4 text-sm">
@@ -296,7 +297,7 @@ export default function OrderDetailPage() {
       )}
 
       <div className="grid grid-cols-2 gap-2">
-        {!['paid', 'cancelled'].includes(order.status) && (
+        {!['payment_pending', 'paid', 'cancelled'].includes(order.status) && (
           <>
             <Button variant="outline" onClick={() => setSplitOpen(true)}><Split className="mr-2 h-4 w-4" />Split</Button>
             <Button variant="outline" onClick={() => setMergeOpen(true)}><Merge className="mr-2 h-4 w-4" />Merge</Button>
@@ -304,6 +305,16 @@ export default function OrderDetailPage() {
               <Percent className="mr-2 h-4 w-4" />{order.discountReason ? 'Update discount' : 'Apply discount'}
             </Button>
           </>
+        )}
+        {(order.status === 'ready' || order.status === 'served') && (
+          <Link href={`/waiter/payments/${order.id}`} className="col-span-2">
+            <Button className="w-full"><CreditCard className="mr-2 h-4 w-4" />Record payment</Button>
+          </Link>
+        )}
+        {(order.status === 'payment_pending' || order.status === 'paid') && (
+          <Link href={`/waiter/payments/${order.id}`} className="col-span-2">
+            <Button variant="outline" className="w-full"><CreditCard className="mr-2 h-4 w-4" />View receipt</Button>
+          </Link>
         )}
         {isPending && (
           <Button variant="destructive" className="col-span-2" onClick={() => setCancelOpen(true)}>
@@ -339,7 +350,7 @@ export default function OrderDetailPage() {
           <div className="flex flex-col gap-2">
             {activeItems.map((item) => (
               <div key={item.id} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm">
-                <span>{item.menuItem.name} <span className="text-muted-foreground">(of {item.quantity})</span></span>
+                <span>{menuItemLabel(item.menuItem.name, item.menuItem.variantLabel)} <span className="text-muted-foreground">(of {item.quantity})</span></span>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number"

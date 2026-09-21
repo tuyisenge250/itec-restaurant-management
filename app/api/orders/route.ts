@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
       include: {
         items: {
           include: {
-            menuItem: { select: { name: true } },
+            menuItem: { select: { name: true, variantLabel: true } },
             preparedBy: { select: { name: true } },
             voidedBy: { select: { name: true } },
           },

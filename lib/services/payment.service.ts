@@ -14,8 +14,11 @@ const PAYABLE_STATUSES = ['ready', 'served'] as const
  * comparisons happen in integer cents. A payment's own `discount` reduces
  * the balance the same way the order-level discount does — once
  * sum(payments.amount) == subtotal - orderDiscount - sum(payments.discount),
- * the order is marked paid. Overpaying beyond the remaining balance is
- * rejected rather than silently accepted.
+ * the order moves to 'payment_pending', NOT straight to 'paid' — the waiter
+ * has collected the money and can hand over a receipt right here, but a
+ * cashier still has to reconcile and confirm it (confirmOrderPayment
+ * below) before it's booked as actually paid. Overpaying beyond the
+ * remaining balance is rejected rather than silently accepted.
  */
 export async function recordPayment(params: {
   orderId: string
@@ -93,9 +96,43 @@ export async function recordPayment(params: {
 
     const fullyPaid = existingAmountCents + newAmountCents >= requiredAmountCents - 1
     if (fullyPaid) {
-      await tx.order.update({ where: { id: orderId }, data: { status: 'paid' } })
+      await tx.order.update({ where: { id: orderId }, data: { status: 'payment_pending' } })
     }
 
     return payment
+  })
+}
+
+/**
+ * Cashier's reconciliation step: closes out an order that's collected full
+ * payment (payment_pending) by booking it as actually paid. This is the
+ * ONLY thing that ever sets status to 'paid' — recordPayment above
+ * deliberately stops short of it.
+ */
+export async function confirmOrderPayment(params: { orderId: string; userId: string; role: string }) {
+  const { orderId, userId, role } = params
+  if (role !== 'admin' && role !== 'cashier') {
+    throw new ForbiddenError('Only cashier or admin can confirm a payment as received')
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({ where: { id: orderId } })
+    if (!order) throw new NotFoundError('Order not found')
+    if (order.status !== 'payment_pending') {
+      throw new BusinessRuleError(`Cannot confirm payment for an order in status ${order.status}`)
+    }
+
+    const updated = await tx.order.update({ where: { id: orderId }, data: { status: 'paid' } })
+
+    await writeAuditLog(tx, {
+      userId,
+      action: 'order.payment_confirmed',
+      entityType: 'Order',
+      entityId: orderId,
+      beforeData: { status: order.status },
+      afterData: { status: updated.status },
+    })
+
+    return updated
   })
 }

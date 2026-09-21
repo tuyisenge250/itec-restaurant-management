@@ -397,6 +397,7 @@ model MenuCategory {
 model MenuItem {
   id                  String        @id @default(cuid())
   name                String
+  variantLabel        String? // e.g. "0.3 L", "0.5 L", "Large" — distinguishes multiple menu items that intentionally share a name but differ by size/quantity/price (same Soda, different pour)
   categoryId          String?
   category            MenuCategory? @relation(fields: [categoryId], references: [id])
   price               Float
@@ -437,7 +438,8 @@ enum OrderStatus {
   preparing // sent to kitchen — item edits locked for waiter; kitchen can still void an item
   ready
   served
-  paid
+  payment_pending // waiter has collected payment in full and handed the customer a receipt — awaiting cashier's reconciliation before it's booked as paid
+  paid // cashier has confirmed the payment — terminal
   cancelled
 }
 
