@@ -44,7 +44,6 @@ export function ProductionOrdersQueue({ assignedRole }: { assignedRole: Producti
       <FulfillProductionOrderDialog
         order={fulfillTarget}
         onClose={() => setFulfillTarget(null)}
-        showStockCheck
         simplified
       />
     </Card>
