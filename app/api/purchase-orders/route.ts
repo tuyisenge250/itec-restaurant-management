@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { createPurchaseOrderSchema } from '@/lib/validation/purchase-order.schema'
 import { createPurchaseOrder } from '@/lib/services/purchase-order.service'
 import { prisma } from '@/lib/db/prisma'
@@ -7,7 +7,7 @@ import { handleApiError } from '@/lib/api-error'
 
 export async function GET() {
   try {
-    await requireRole('admin')
+    await requirePermission('purchase_orders.manage')
     const purchaseOrders = await prisma.purchaseOrder.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
@@ -23,7 +23,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireRole('admin')
+    const user = await requirePermission('purchase_orders.manage')
     const body = createPurchaseOrderSchema.parse(await req.json())
     const po = await createPurchaseOrder({ ...body, createdById: user.sub })
     return NextResponse.json(po, { status: 201 })

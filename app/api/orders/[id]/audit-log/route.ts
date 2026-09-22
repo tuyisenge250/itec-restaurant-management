@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { ForbiddenError } from '@/lib/errors'
 import { handleApiError } from '@/lib/api-error'
@@ -17,14 +17,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireRole('admin', 'kitchen', 'waiter', 'cashier')
+    const user = await requirePermission('orders.manage_own', 'orders.view_all')
     const { id } = await params
 
     const order = await prisma.order.findUniqueOrThrow({
       where: { id },
       include: { items: { select: { id: true, isVoided: true } }, payments: { select: { id: true } } },
     })
-    if (user.role === 'waiter' && order.createdById !== user.sub) {
+    if (!user.role.permissions.includes('orders.view_all') && order.createdById !== user.sub) {
       throw new ForbiddenError('You can only view the history of orders you created')
     }
 

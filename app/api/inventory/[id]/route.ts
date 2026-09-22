@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 
@@ -14,7 +14,7 @@ const updateInventoryItemSchema = z.object({
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole('admin', 'kitchen', 'waiter')
+    await requirePermission('inventory.view')
     const { id } = await params
     const item = await prisma.inventoryItem.findUniqueOrThrow({ where: { id } })
     return NextResponse.json(item)
@@ -25,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole('admin')
+    await requirePermission('inventory.manage')
     const { id } = await params
     const body = updateInventoryItemSchema.parse(await req.json())
     const item = await prisma.inventoryItem.update({ where: { id }, data: body })
@@ -40,7 +40,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 // item with zero history and no lots is actually removed from the table.
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole('admin')
+    await requirePermission('inventory.manage')
     const { id } = await params
 
     const [lotCount, txnCount] = await Promise.all([

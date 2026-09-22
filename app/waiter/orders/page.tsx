@@ -101,7 +101,7 @@ export default function WaiterOrdersPage() {
           </div>
         }
       />
-      <ProductionOrdersQueue assignedRole="waiter" />
+      <ProductionOrdersQueue assignedTeam="waiter" />
       <Card>
         <CardContent className="p-0">
           {isLoading ? (

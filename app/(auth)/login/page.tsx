@@ -15,7 +15,7 @@ const demoUsers = [
   { label: 'Cashier', email: 'cashier@demo.com', password: 'demo1234', icon: Wallet,        color: 'text-success' },
 ]
 
-const roleRedirect: Record<string, string> = {
+const homeAreaRedirect: Record<string, string> = {
   admin:   '/admin',
   kitchen: '/kitchen/orders',
   waiter:  '/waiter/orders',
@@ -47,7 +47,7 @@ export default function LoginPage() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? 'Login failed'); return }
-      router.push(next && next.startsWith('/') ? next : (roleRedirect[data.role] ?? '/'))
+      router.push(next && next.startsWith('/') ? next : (homeAreaRedirect[data.homeArea] ?? '/'))
     } catch {
       setError('Network error. Please try again.')
     } finally {

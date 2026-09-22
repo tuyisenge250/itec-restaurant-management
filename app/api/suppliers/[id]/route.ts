@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { updateSupplierSchema } from '@/lib/validation/purchase-order.schema'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireRole('admin')
+    await requirePermission('suppliers.manage')
     const { id } = await params
     const supplier = await prisma.supplier.findUniqueOrThrow({ where: { id } })
     return NextResponse.json(supplier)
@@ -23,7 +23,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireRole('admin')
+    await requirePermission('suppliers.manage')
     const { id } = await params
     const body = updateSupplierSchema.parse(await req.json())
     const supplier = await prisma.supplier.update({ where: { id }, data: body })
@@ -39,7 +39,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireRole('admin')
+    await requirePermission('suppliers.manage')
     const { id } = await params
     await prisma.supplier.update({ where: { id }, data: { isActive: false } })
     return new NextResponse(null, { status: 204 })

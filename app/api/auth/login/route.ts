@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { email, password } = parsed.data
-  const user = await prisma.user.findUnique({ where: { email } })
+  const user = await prisma.user.findUnique({ where: { email }, include: { role: true } })
 
   if (!user || !user.isActive) {
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
@@ -27,11 +27,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
   }
 
-  const payload = { sub: user.id, role: user.role, name: user.name }
+  // homeArea is the only role-derived claim carried in the token, and it's
+  // advisory-only (see lib/auth/jwt.ts) — every real permission check
+  // re-reads the role fresh from the database on each request.
+  const payload = { sub: user.id, name: user.name, homeArea: user.role.homeArea }
   const accessToken = await signAccessToken(payload)
   const refreshToken = await signRefreshToken(payload)
 
-  const res = NextResponse.json({ role: user.role, name: user.name })
+  const res = NextResponse.json({ homeArea: user.role.homeArea, name: user.name })
 
   res.cookies.set('token', accessToken, {
     httpOnly: true,

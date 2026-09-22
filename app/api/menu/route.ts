@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireUser, requireRole } from '@/lib/auth/session'
+import { requireUser, requirePermission } from '@/lib/auth/session'
 import { createMenuItemSchema } from '@/lib/validation/menu.schema'
 import { recomputeAvailability } from '@/lib/services/menu.service'
 import { prisma } from '@/lib/db/prisma'
@@ -26,7 +26,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    await requireRole('admin')
+    await requirePermission('menu.manage')
     const body = createMenuItemSchema.parse(await req.json())
 
     const menuItem = await prisma.$transaction(async (tx) => {

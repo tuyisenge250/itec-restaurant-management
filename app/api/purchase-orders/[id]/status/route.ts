@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { updatePurchaseOrderStatusSchema } from '@/lib/validation/purchase-order.schema'
 import { updatePurchaseOrderStatus } from '@/lib/services/purchase-order.service'
 import { handleApiError } from '@/lib/api-error'
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await requireRole('admin')
+    const user = await requirePermission('purchase_orders.manage')
     const { id } = await params
     const { status } = updatePurchaseOrderStatusSchema.parse(await req.json())
 

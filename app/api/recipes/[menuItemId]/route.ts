@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireUser, requireRole } from '@/lib/auth/session'
+import { requireUser, requirePermission } from '@/lib/auth/session'
 import { updateRecipeSchema } from '@/lib/validation/recipe.schema'
 import { getRecipeCostBreakdown } from '@/lib/services/recipe.service'
 import { recomputeAvailability } from '@/lib/services/menu.service'
@@ -20,7 +20,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ men
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ menuItemId: string }> }) {
   try {
-    const user = await requireRole('admin')
+    const user = await requirePermission('menu.manage')
     const { menuItemId } = await params
     const { ingredients } = updateRecipeSchema.parse(await req.json())
 

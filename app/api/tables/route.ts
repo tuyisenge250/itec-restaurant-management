@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 
@@ -11,7 +11,7 @@ import { handleApiError } from '@/lib/api-error'
 // see other waiters' orders on it).
 export async function GET() {
   try {
-    await requireRole('admin', 'kitchen', 'waiter')
+    await requirePermission('tables.view')
 
     const rows = await prisma.order.findMany({
       distinct: ['table'],

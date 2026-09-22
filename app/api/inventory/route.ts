@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 
@@ -12,11 +12,12 @@ const createInventoryItemSchema = z.object({
 })
 
 // Any staff role can view inventory levels (kitchen needs this to know
-// what's available; waiters don't hit this directly today but nothing here
-// is sensitive). Stock quantities themselves are always derived from lots.
+// what's available, cashier needs it to requisition stock for the bar;
+// waiters don't hit this directly today but nothing here is sensitive).
+// Stock quantities themselves are always derived from lots.
 export async function GET() {
   try {
-    await requireRole('admin', 'kitchen', 'waiter')
+    await requirePermission('inventory.view')
     const items = await prisma.inventoryItem.findMany({
       where: { isActive: true },
       orderBy: { name: 'asc' },
@@ -39,7 +40,7 @@ export async function GET() {
 // adjustment (see /api/inventory/adjust), never directly here.
 export async function POST(req: NextRequest) {
   try {
-    await requireRole('admin')
+    await requirePermission('inventory.manage')
     const body = createInventoryItemSchema.parse(await req.json())
     const item = await prisma.inventoryItem.create({ data: body })
     return NextResponse.json(item, { status: 201 })

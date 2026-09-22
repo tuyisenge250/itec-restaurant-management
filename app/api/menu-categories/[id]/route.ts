@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { updateMenuCategorySchema } from '@/lib/validation/menu.schema'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
@@ -7,7 +7,7 @@ import { ConflictError } from '@/lib/errors'
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole('admin')
+    await requirePermission('menu.manage')
     const { id } = await params
     const body = updateMenuCategorySchema.parse(await req.json())
     const category = await prisma.menuCategory.update({ where: { id }, data: body })
@@ -21,7 +21,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 // than silently orphaning them — reassign the items first.
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole('admin')
+    await requirePermission('menu.manage')
     const { id } = await params
 
     const itemCount = await prisma.menuItem.count({ where: { categoryId: id } })

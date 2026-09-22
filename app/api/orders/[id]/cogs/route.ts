@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 
@@ -8,7 +8,7 @@ import { handleApiError } from '@/lib/api-error'
 // provable rather than a single opaque number.
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole('admin')
+    await requirePermission('orders.cogs.view')
     const { id } = await params
 
     const order = await prisma.order.findUniqueOrThrow({

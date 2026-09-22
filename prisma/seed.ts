@@ -1,6 +1,7 @@
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
+import { SEED_ROLES } from './seed-roles'
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! })
 const prisma = new PrismaClient({ adapter })
@@ -8,10 +9,27 @@ const prisma = new PrismaClient({ adapter })
 async function main() {
   const passwordHash = await bcrypt.hash('demo1234', 10)
 
+  // The 4 seeded dynamic roles — created here so a fresh database seeds with
+  // working role-based access out of the box.
+  const roleByName = new Map<string, string>()
+  for (const r of SEED_ROLES) {
+    const row = await prisma.role.upsert({
+      where: { name: r.name },
+      update: { homeArea: r.homeArea, permissions: r.permissions, maxDiscountPercent: r.maxDiscountPercent },
+      create: r,
+    })
+    roleByName.set(r.name, row.id)
+  }
+  function roleId(name: string) {
+    const id = roleByName.get(name)
+    if (!id) throw new Error(`Seed role '${name}' was not created`)
+    return id
+  }
+
   const admin = await prisma.user.upsert({
     where: { email: 'admin@demo.com' },
     update: {},
-    create: { name: 'Admin User', email: 'admin@demo.com', passwordHash, role: 'admin' },
+    create: { name: 'Admin User', email: 'admin@demo.com', passwordHash, roleId: roleId('Admin') },
   })
 
   // A second admin exists so the seeded purchase order can demonstrate the
@@ -19,25 +37,25 @@ async function main() {
   const opsAdmin = await prisma.user.upsert({
     where: { email: 'ops@demo.com' },
     update: {},
-    create: { name: 'Ops Admin', email: 'ops@demo.com', passwordHash, role: 'admin' },
+    create: { name: 'Ops Admin', email: 'ops@demo.com', passwordHash, roleId: roleId('Admin') },
   })
 
   await prisma.user.upsert({
     where: { email: 'kitchen@demo.com' },
     update: {},
-    create: { name: 'Kitchen User', email: 'kitchen@demo.com', passwordHash, role: 'kitchen' },
+    create: { name: 'Kitchen User', email: 'kitchen@demo.com', passwordHash, roleId: roleId('Kitchen') },
   })
 
   await prisma.user.upsert({
     where: { email: 'waiter@demo.com' },
     update: {},
-    create: { name: 'Waiter User', email: 'waiter@demo.com', passwordHash, role: 'waiter' },
+    create: { name: 'Waiter User', email: 'waiter@demo.com', passwordHash, roleId: roleId('Waiter') },
   })
 
   await prisma.user.upsert({
     where: { email: 'cashier@demo.com' },
     update: {},
-    create: { name: 'Cashier User', email: 'cashier@demo.com', passwordHash, role: 'cashier' },
+    create: { name: 'Cashier User', email: 'cashier@demo.com', passwordHash, roleId: roleId('Cashier') },
   })
 
   const supplier = await prisma.supplier.create({

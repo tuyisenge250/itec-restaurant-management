@@ -25,7 +25,6 @@ import {
 } from '@/lib/api/orders'
 import { useMenu } from '@/lib/api/menu'
 import { useCurrentUser } from '@/lib/api/auth'
-import { DISCOUNT_CAPS } from '@/lib/rbac'
 import { computeKitchenInfo, formatDuration } from '@/lib/kitchen-timing'
 import { rwf, menuItemLabel } from '@/lib/utils'
 
@@ -82,7 +81,7 @@ export default function OrderDetailPage() {
   const total = activeItems.reduce((s, i) => s + i.priceAtSale * i.quantity, 0)
   const isPending = order.status === 'pending'
   const hasPrepItems = order.items.some((i) => i.requiresPreparation)
-  const cap = me ? DISCOUNT_CAPS[me.role] : 0
+  const cap = me?.role.maxDiscountPercent ?? 0
   const { preparedByNames, sentToKitchenAt, kitchenDurationMs, inProgressMs } = computeKitchenInfo(order)
 
   const eligibleMergeTargets = allOrders.filter(

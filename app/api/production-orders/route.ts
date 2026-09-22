@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Prisma, ProductionOrderStatus, ProductionSource, Role } from '@prisma/client'
-import { requireRole } from '@/lib/auth/session'
+import { Prisma, ProductionOrderStatus, ProductionSource, ProductionTeam } from '@prisma/client'
+import { requirePermission } from '@/lib/auth/session'
 import { createProductionOrderSchema } from '@/lib/validation/prep-production-order.schema'
 import { createProductionOrder } from '@/lib/services/prep-production-order.service'
 import { prisma } from '@/lib/db/prisma'
@@ -8,26 +8,26 @@ import { handleApiError } from '@/lib/api-error'
 
 const STATUSES = Object.values(ProductionOrderStatus)
 const SOURCES = Object.values(ProductionSource)
-const ROLES = Object.values(Role)
+const TEAMS = Object.values(ProductionTeam)
 
 // Admin sees every order (planning/oversight). Kitchen and waiter see every
-// order too, not just their own assignedRole — they need to know what's
+// order too, not just their own assignedTeam — they need to know what's
 // outside-sourced (not theirs to act on) and what's assigned to the other
-// role, same reasoning as the kitchen board seeing every table's tickets
+// team, same reasoning as the kitchen board seeing every table's tickets
 // rather than being scoped like a waiter's regular orders are; each queue
 // page filters client-side to what it actually shows action buttons for.
 export async function GET(req: NextRequest) {
   try {
-    await requireRole('admin', 'kitchen', 'waiter')
+    await requirePermission('production_orders.view')
     const { searchParams } = req.nextUrl
     const statusParam = searchParams.get('status')
     const sourceParam = searchParams.get('source')
-    const assignedRoleParam = searchParams.get('assignedRole')
+    const assignedTeamParam = searchParams.get('assignedTeam')
     const status = STATUSES.find((s) => s === statusParam)
     const source = SOURCES.find((s) => s === sourceParam)
-    const assignedRole = ROLES.find((r) => r === assignedRoleParam)
+    const assignedTeam = TEAMS.find((t) => t === assignedTeamParam)
 
-    const where: Prisma.PrepProductionOrderWhereInput = { status, source, assignedRole }
+    const where: Prisma.PrepProductionOrderWhereInput = { status, source, assignedTeam }
 
     const orders = await prisma.prepProductionOrder.findMany({
       where,
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireRole('admin')
+    const user = await requirePermission('production_orders.manage')
     const body = createProductionOrderSchema.parse(await req.json())
 
     const order = await createProductionOrder({ ...body, createdById: user.sub })

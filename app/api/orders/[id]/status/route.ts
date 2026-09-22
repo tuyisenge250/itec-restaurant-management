@@ -10,7 +10,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { id } = await params
     const { status } = updateOrderStatusSchema.parse(await req.json())
 
-    const order = await updateOrderStatus({ orderId: id, newStatus: status, userId: user.sub, role: user.role })
+    const order = await updateOrderStatus({ orderId: id, newStatus: status, userId: user.sub, permissions: user.role.permissions })
     return NextResponse.json(order)
   } catch (err) {
     return handleApiError(err)

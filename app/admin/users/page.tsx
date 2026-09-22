@@ -18,23 +18,24 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
 import { useUsers, useCreateUser, useUpdateUser, useDeleteUser, type User } from '@/lib/api/users'
+import { useRoles } from '@/lib/api/roles'
 
 const createSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(6),
-  role: z.enum(['admin', 'kitchen', 'waiter', 'cashier']),
+  roleId: z.string().min(1),
 })
 const editSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(6).or(z.literal('')).optional(),
-  role: z.enum(['admin', 'kitchen', 'waiter', 'cashier']),
+  roleId: z.string().min(1),
 })
 type CreateFormValues = z.infer<typeof createSchema>
 type EditFormValues = z.infer<typeof editSchema>
 
-const roleBadge: Record<string, string> = {
+const homeAreaBadge: Record<string, string> = {
   admin:   'bg-primary text-primary-foreground',
   kitchen: 'bg-warning text-warning-foreground',
   waiter:  'bg-secondary text-secondary-foreground',
@@ -46,23 +47,24 @@ export default function UsersPage() {
   const [editing, setEditing] = useState<User | null>(null)
 
   const { data: users = [], isLoading } = useUsers()
+  const { data: roles = [] } = useRoles()
   const createMutation = useCreateUser()
   const updateMutation = useUpdateUser()
   const deleteMutation = useDeleteUser()
 
-  const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<CreateFormValues | EditFormValues>({
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<CreateFormValues | EditFormValues>({
     resolver: zodResolver(editing ? editSchema : createSchema) as never,
   })
 
   function openEdit(u: User) {
     setEditing(u)
-    reset({ name: u.name, email: u.email, password: '', role: u.role })
+    reset({ name: u.name, email: u.email, password: '', roleId: u.role.id })
     setOpen(true)
   }
 
   function openCreate() {
     setEditing(null)
-    reset({ name: '', email: '', password: '', role: undefined })
+    reset({ name: '', email: '', password: '', roleId: undefined })
     setOpen(true)
   }
 
@@ -114,7 +116,7 @@ export default function UsersPage() {
                   <TableRow key={u.id} className="hover:bg-accent">
                     <TableCell className="font-medium">{u.name}</TableCell>
                     <TableCell className="text-muted-foreground">{u.email}</TableCell>
-                    <TableCell><Badge className={roleBadge[u.role]}>{u.role}</Badge></TableCell>
+                    <TableCell><Badge className={homeAreaBadge[u.role.homeArea]}>{u.role.name}</Badge></TableCell>
                     <TableCell>
                       <button onClick={() => updateMutation.mutate({ id: u.id, data: { isActive: !u.isActive } })}>
                         <StatusBadge status={u.isActive ? 'active' : 'inactive'} />
@@ -161,19 +163,15 @@ export default function UsersPage() {
             <div className="flex flex-col gap-1.5">
               <Label>Role</Label>
               <Select
-                items={{ admin: 'Admin', kitchen: 'Kitchen', waiter: 'Waiter', cashier: 'Cashier' }}
-                defaultValue={editing?.role}
-                onValueChange={(v) => setValue('role', v as CreateFormValues['role'])}
+                value={watch('roleId') || null}
+                onValueChange={(v) => v && setValue('roleId', v)}
               >
                 <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="kitchen">Kitchen</SelectItem>
-                  <SelectItem value="waiter">Waiter</SelectItem>
-                  <SelectItem value="cashier">Cashier</SelectItem>
+                  {roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
                 </SelectContent>
               </Select>
-              {errors.role && <p className="text-xs text-destructive">{errors.role.message}</p>}
+              {errors.roleId && <p className="text-xs text-destructive">{errors.roleId.message}</p>}
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => { setOpen(false); setEditing(null); reset() }}>Cancel</Button>

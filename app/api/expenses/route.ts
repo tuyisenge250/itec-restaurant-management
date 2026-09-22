@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { createExpenseSchema } from '@/lib/validation/expense.schema'
 import { createExpense, listExpenses } from '@/lib/services/expense.service'
 import { handleApiError } from '@/lib/api-error'
@@ -10,7 +10,7 @@ const PAGE_SIZE = 50
 
 export async function GET(req: NextRequest) {
   try {
-    await requireRole('admin')
+    await requirePermission('expenses.manage')
     const { searchParams } = req.nextUrl
     const from = searchParams.get('from')
     const to = searchParams.get('to')
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireRole('admin')
+    const user = await requirePermission('expenses.manage')
     const body = createExpenseSchema.parse(await req.json())
     const expense = await createExpense({ ...body, recordedById: user.sub })
     return NextResponse.json(expense, { status: 201 })

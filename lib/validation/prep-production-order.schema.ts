@@ -4,18 +4,18 @@ export const createProductionOrderSchema = z
   .object({
     prepRecipeId: z.string().min(1),
     targetQuantity: z.number().positive(),
-    // Decided once, at order creation — internal goes to the assigned role's
+    // Decided once, at order creation — internal goes to the assigned team's
     // queue, outside consumes its ingredients right away (see the service).
     // Can't be changed once the order exists.
     source: z.enum(['internal', 'outside']),
     // Required for internal (who executes it); meaningless for outside, so
     // never sent there — admin is always the one who receives an outside order.
-    assignedRole: z.enum(['kitchen', 'waiter']).optional(),
+    assignedTeam: z.enum(['kitchen', 'waiter']).optional(),
     notes: z.string().optional(),
   })
-  .refine((data) => data.source !== 'internal' || !!data.assignedRole, {
+  .refine((data) => data.source !== 'internal' || !!data.assignedTeam, {
     message: 'An in-house production order needs to be assigned to kitchen or waiter',
-    path: ['assignedRole'],
+    path: ['assignedTeam'],
   })
 
 // Fulfilling an order records what ACTUALLY happened — quantityProduced can

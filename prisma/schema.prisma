@@ -10,11 +10,36 @@ datasource db {
 // AUTH & USERS
 // ─────────────────────────────────────────────
 
-enum Role {
+// Which of the app's 4 existing page-shell trees (app/admin, app/kitchen,
+// app/waiter, app/cashier) a role lands in — this stays a fixed set even
+// though the role itself (name + permissions) is fully admin-editable.
+// Building fully dynamic page routing is out of scope; a custom role picks
+// one of these 4 existing shells.
+enum HomeArea {
   admin
   kitchen
   waiter
   cashier
+}
+
+// Admin-editable role: a name, which page-shell it opens (homeArea), a
+// discount ceiling (replaces the old hardcoded DISCOUNT_CAPS), and a set of
+// permission keys (see lib/permissions.ts for the catalog) checked live on
+// every request — nothing here is cached in the session token. Deleting a
+// role with users still assigned is rejected (see role.service.ts); there's
+// no separate "isSystem" flag protecting the 4 seeded roles beyond that.
+model Role {
+  id                 String   @id @default(cuid())
+  name               String   @unique
+  homeArea           HomeArea
+  permissions        String[]
+  maxDiscountPercent Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  users User[]
+
+  @@map("roles")
 }
 
 model User {
@@ -22,25 +47,30 @@ model User {
   name         String
   email        String   @unique
   passwordHash String
-  role         Role
+  roleId       String
+  role         Role     @relation(fields: [roleId], references: [id])
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  purchaseOrdersCreated    PurchaseOrder[]        @relation("POCreatedBy")
-  purchaseOrdersApproved   PurchaseOrder[]        @relation("POApprovedBy")
-  goodsReceipts            GoodsReceipt[]         @relation("ReceivedByUser")
-  supplierPaymentsRecorded SupplierPayment[]      @relation("SupplierPaymentRecordedBy")
-  inventoryTransactions    InventoryTransaction[] @relation("RecordedByUser")
-  prepProductionRuns       PrepProductionRun[]    @relation("PrepRecordedByUser")
-  productionOrdersCreated  PrepProductionOrder[]  @relation("ProductionOrderCreatedBy")
-  orders                   Order[]                @relation("CreatedByWaiter")
-  ordersStarted            Order[]                @relation("OrderStartedBy")
-  preparedOrderItems       OrderItem[]            @relation("PreparedByKitchen")
-  voidedOrderItems         OrderItem[]            @relation("VoidedByUser")
-  payments                 Payment[]              @relation("RecordedByUser")
-  expensesRecorded         Expense[]              @relation("ExpenseRecordedBy")
+  purchaseOrdersCreated    PurchaseOrder[]            @relation("POCreatedBy")
+  purchaseOrdersApproved   PurchaseOrder[]            @relation("POApprovedBy")
+  goodsReceipts            GoodsReceipt[]             @relation("ReceivedByUser")
+  supplierPaymentsRecorded SupplierPayment[]          @relation("SupplierPaymentRecordedBy")
+  inventoryTransactions    InventoryTransaction[]     @relation("RecordedByUser")
+  prepProductionRuns       PrepProductionRun[]        @relation("PrepRecordedByUser")
+  productionOrdersCreated  PrepProductionOrder[]      @relation("ProductionOrderCreatedBy")
+  orders                   Order[]                    @relation("CreatedByWaiter")
+  ordersStarted            Order[]                    @relation("OrderStartedBy")
+  preparedOrderItems       OrderItem[]                @relation("PreparedByKitchen")
+  voidedOrderItems         OrderItem[]                @relation("VoidedByUser")
+  payments                 Payment[]                  @relation("RecordedByUser")
+  expensesRecorded         Expense[]                  @relation("ExpenseRecordedBy")
   auditLogs                AuditLog[]
+  requisitionsRequested    StockRequisition[]         @relation("RequisitionRequestedBy")
+  requisitionsReviewed     StockRequisition[]         @relation("RequisitionReviewedBy")
+  requisitionsReceived     StockRequisition[]         @relation("RequisitionReceivedBy")
+  locationStockTxns        LocationStockTransaction[] @relation("LocationStockRecordedBy")
 
   @@map("users")
 }
@@ -195,6 +225,9 @@ model InventoryItem {
   lots                  InventoryLot[]
   inventoryTransactions InventoryTransaction[]
   recipeItems           RecipeItem[] // used as an ingredient in a MenuItem BOM
+  requisitionItems      StockRequisitionItem[]
+  locationStocks        LocationStock[]
+  locationStockTxns     LocationStockTransaction[]
 
   // Sub-recipe / two-level BOM support:
   prepRecipe       PrepRecipe?      @relation("PrepRecipeOutput") // if itemType = prepared or finished_good, this is how it's made (both are produced via a PrepProductionRun)
@@ -246,6 +279,7 @@ enum InventoryTransactionSource {
   prep_production
   waste
   manual_adjustment
+  stock_requisition // left main stock for kitchen/bar on requisition approval — see StockRequisition
 }
 
 // Immutable ledger — every receipt, consumption, waste, and adjustment, tied to the specific lot affected.
@@ -304,6 +338,16 @@ model PrepRecipeItem {
   @@map("prep_recipe_items")
 }
 
+// Which team fulfills an internal production order — a fixed business-
+// routing concept ("who does this"), decoupled from the dynamic Role model
+// on purpose: it's always exactly these two values, never grows with
+// whatever custom roles admin creates, and doesn't need FK-cascade handling
+// when a role is edited/deleted.
+enum ProductionTeam {
+  kitchen
+  waiter
+}
+
 enum ProductionSource {
   internal // made in-house — ingredients are deducted at fulfillment, scaled to the actual quantity produced
   outside // outsourced to a third party who does the labor — WE still supply the ingredients (deducted the
@@ -336,7 +380,7 @@ model PrepProductionOrder {
   source                 ProductionSource // decided at order creation; the run that fulfills it must match
   // Who this internal order is assigned to execute it — kitchen or waiter. Always null for an outside
   // order (there's no in-house assignee; admin is the one who receives it).
-  assignedRole           Role?
+  assignedTeam           ProductionTeam?
   // The ingredient cost already deducted at creation, for an outside order only — locked in then because
   // that's when the ingredients actually left the building. Read back at receiving to compute final unit
   // cost (this + the service fee paid). Always null for an internal order (nothing is deducted until
@@ -379,6 +423,110 @@ model PrepProductionRun {
   createdAt         DateTime             @default(now())
 
   @@map("prep_production_runs")
+}
+
+// ─────────────────────────────────────────────
+// LOCATION STOCK / REQUISITIONS (main stock → kitchen/bar)
+// Tracking/requisition layer on top of the main stock above — NOT a second
+// costing engine. Order fulfillment and prep production always draw from
+// the main InventoryLot pool exactly as before; a location's quantity here
+// only moves via a requisition being received or an admin's manual
+// adjustment, so it reflects "what was physically sent to this location,"
+// not a live moment-to-moment consumption count.
+// ─────────────────────────────────────────────
+
+// Kitchen maps to the `kitchen` Role, bar to the `cashier` Role (there's no
+// separate "bar" role) — see LOCATION_ROLE in stock-requisition.service.ts.
+enum StockLocation {
+  kitchen
+  bar
+}
+
+enum StockRequisitionStatus {
+  pending // awaiting admin review
+  approved // admin sent it — ingredients already deducted from main stock, awaiting the location's receipt confirmation
+  rejected // admin sent it back — terminal, nothing moved
+  received // location confirmed what arrived — terminal, LocationStock credited
+  cancelled // requester (or admin) pulled it back before review — terminal, nothing moved
+}
+
+// A kitchen/bar request to draw from main stock, reviewed by admin — the
+// same planning-then-execution shape as PrepProductionOrder, just for
+// internal stock transfer instead of production. Approving is the moment
+// stock actually leaves main (mirrors an outside ProductionOrder deducting
+// at creation): that's when it's physically handed over, not whenever the
+// location gets around to confirming receipt.
+model StockRequisition {
+  id            String                 @id @default(cuid())
+  location      StockLocation
+  status        StockRequisitionStatus @default(pending)
+  notes         String? // requester's note (what it's for, urgency, etc.)
+  requestedById String
+  requestedBy   User                   @relation("RequisitionRequestedBy", fields: [requestedById], references: [id])
+  reviewedById  String?
+  reviewedBy    User?                  @relation("RequisitionReviewedBy", fields: [reviewedById], references: [id])
+  reviewedAt    DateTime?
+  reviewNotes   String? // admin's note — required on reject (the "sent back" reason)
+  receivedById  String?
+  receivedBy    User?                  @relation("RequisitionReceivedBy", fields: [receivedById], references: [id])
+  receivedAt    DateTime?
+  createdAt     DateTime               @default(now())
+
+  items StockRequisitionItem[]
+
+  @@map("stock_requisitions")
+}
+
+model StockRequisitionItem {
+  id                String           @id @default(cuid())
+  requisitionId     String
+  requisition       StockRequisition @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+  inventoryItemId   String
+  inventoryItem     InventoryItem    @relation(fields: [inventoryItemId], references: [id])
+  quantityRequested Float
+  quantityApproved  Float? // set on approval — may be less than requested (partial send)
+  quantityReceived  Float? // set on receipt — may differ from approved (breakage/shortage in transit)
+
+  @@map("stock_requisition_items")
+}
+
+// Current quantity of one item sitting at one location right now — a cache,
+// same role as InventoryItem.currentStock is for main. Source of truth is
+// LocationStockTransaction.
+model LocationStock {
+  id              String        @id @default(cuid())
+  inventoryItemId String
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  location        StockLocation
+  quantity        Float         @default(0)
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([inventoryItemId, location])
+  @@map("location_stocks")
+}
+
+enum LocationStockTransactionType {
+  receipt // a requisition was received at this location
+  adjustment // manual correction by admin, requires a reason code
+}
+
+// Immutable ledger for LocationStock, mirroring InventoryTransaction.
+model LocationStockTransaction {
+  id              String                       @id @default(cuid())
+  inventoryItemId String
+  inventoryItem   InventoryItem                @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  location        StockLocation
+  type            LocationStockTransactionType
+  quantity        Float // signed
+  referenceId     String? // the StockRequisition id, for a receipt
+  reasonCode      String? // required for manual adjustments
+  recordedById    String
+  recordedBy      User                         @relation("LocationStockRecordedBy", fields: [recordedById], references: [id])
+  notes           String?
+  createdAt       DateTime                     @default(now())
+
+  @@index([inventoryItemId, location, createdAt])
+  @@map("location_stock_transactions")
 }
 
 // ─────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { adjustStockSchema } from '@/lib/validation/inventory.schema'
 import { adjustStock } from '@/lib/services/inventory.service'
 import { writeAuditLog } from '@/lib/audit'
@@ -8,7 +8,7 @@ import { handleApiError } from '@/lib/api-error'
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireRole('admin')
+    const user = await requirePermission('inventory.manage')
     const body = adjustStockSchema.parse(await req.json())
 
     await prisma.$transaction(async (tx) => {

@@ -1,21 +1,14 @@
-import type { Role } from '@prisma/client'
 import { BusinessRuleError } from '@/lib/errors'
 
-// Maximum discount percent each role may apply to an order/payment, server-enforced.
-// The UI hiding a bigger discount field is not access control — every discount
-// request is re-checked here regardless of what the client sent.
-export const DISCOUNT_CAPS: Record<Role, number> = {
-  waiter: 15,
-  kitchen: 0,
-  cashier: 15,
-  admin: 100,
-}
-
-export function assertDiscountAllowed(role: Role, discountPercent: number) {
-  const cap = DISCOUNT_CAPS[role]
-  if (discountPercent > cap) {
+// The discount ceiling is now a per-role field (Role.maxDiscountPercent,
+// admin-editable) rather than a hardcoded role->number map — the caller
+// resolves it from the actor's role (already fetched by requireUser) and
+// passes it straight in. Server-enforced regardless of what the client sent;
+// the UI hiding a bigger discount field is not access control.
+export function assertDiscountAllowed(maxDiscountPercent: number, discountPercent: number) {
+  if (discountPercent > maxDiscountPercent) {
     throw new BusinessRuleError(
-      `${role} may not apply a discount above ${cap}% (requested ${discountPercent}%)`,
+      `Your role may not apply a discount above ${maxDiscountPercent}% (requested ${discountPercent}%)`,
       'DISCOUNT_CAP_EXCEEDED'
     )
   }

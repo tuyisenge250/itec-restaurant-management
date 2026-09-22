@@ -12,9 +12,11 @@ export async function GET(
     const user = await requireUser()
     const { id } = await params
     const order = await getOrderWithDetails(id)
-    // A waiter can only open orders they created — kitchen and admin need
-    // unrestricted access to fulfill/oversee any order.
-    if (user.role === 'waiter' && order.createdById !== user.sub) {
+    // Anyone without orders.view_all is scoped to their own orders (today
+    // that's the waiter role's default bundle) — kitchen/cashier/admin hold
+    // orders.view_all and get unrestricted access to fulfill/oversee any
+    // order.
+    if (!user.role.permissions.includes('orders.view_all') && order.createdById !== user.sub) {
       throw new ForbiddenError('You can only view orders you created')
     }
     return NextResponse.json(order)

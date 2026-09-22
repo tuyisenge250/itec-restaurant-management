@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { updateExpenseSchema } from '@/lib/validation/expense.schema'
 import { updateExpense, deleteExpense } from '@/lib/services/expense.service'
 import { handleApiError } from '@/lib/api-error'
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await requireRole('admin')
+    const user = await requirePermission('expenses.manage')
     const { id } = await params
     const body = updateExpenseSchema.parse(await req.json())
     const expense = await updateExpense(id, body, user.sub)
@@ -20,7 +20,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 // past period stays reproducible even after someone removes a bad entry.
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await requireRole('admin')
+    const user = await requirePermission('expenses.manage')
     const { id } = await params
     await deleteExpense(id, user.sub)
     return new NextResponse(null, { status: 204 })

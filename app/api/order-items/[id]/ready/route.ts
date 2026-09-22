@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { markOrderItemReady } from '@/lib/services/order.service'
 import { handleApiError } from '@/lib/api-error'
 
@@ -10,10 +10,10 @@ import { handleApiError } from '@/lib/api-error'
 // order's items can finish independently.
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await requireRole('kitchen', 'cashier', 'admin')
+    const user = await requirePermission('order_items.fulfill_prep', 'order_items.fulfill_direct')
     const { id } = await params
 
-    const item = await markOrderItemReady({ orderItemId: id, userId: user.sub, role: user.role })
+    const item = await markOrderItemReady({ orderItemId: id, userId: user.sub, permissions: user.role.permissions })
     return NextResponse.json(item)
   } catch (err) {
     return handleApiError(err)

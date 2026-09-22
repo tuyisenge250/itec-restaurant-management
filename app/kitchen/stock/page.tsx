@@ -78,7 +78,7 @@ export default function KitchenStockPage() {
     <div className="flex flex-col gap-6">
       <PageHeader title="Finished Stock" description="Ready-to-serve items sitting in stock right now" />
 
-      <ProductionOrdersQueue assignedRole="kitchen" />
+      <ProductionOrdersQueue assignedTeam="kitchen" />
 
       <Card>
         <CardContent className="p-0">

@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
-import type { PaymentMethod, Prisma, Role } from '@prisma/client'
+import type { PaymentMethod, Prisma } from '@prisma/client'
 import { toCents, sumCents } from '@/lib/money'
 import { assertDiscountAllowed } from '@/lib/rbac'
 import { writeAuditLog } from '@/lib/audit'
@@ -28,9 +28,10 @@ export async function recordPayment(params: {
   discountReason?: string
   notes?: string
   userId: string
-  role: Role
+  permissions: string[]
+  maxDiscountPercent: number
 }) {
-  const { orderId, method, amount, discount, discountReason, notes, userId, role } = params
+  const { orderId, method, amount, discount, discountReason, notes, userId, permissions, maxDiscountPercent } = params
 
   return prisma.$transaction(async (tx: TxClient) => {
     const order = await tx.order.findUnique({
@@ -38,7 +39,7 @@ export async function recordPayment(params: {
       include: { items: true, payments: true },
     })
     if (!order) throw new NotFoundError('Order not found')
-    if (role !== 'admin' && order.createdById !== userId) {
+    if (!permissions.includes('orders.manage_all') && order.createdById !== userId) {
       throw new ForbiddenError('Only the order\'s own waiter or an admin can record a payment for it')
     }
     if (!PAYABLE_STATUSES.includes(order.status as (typeof PAYABLE_STATUSES)[number])) {
@@ -60,7 +61,7 @@ export async function recordPayment(params: {
 
     if (discount > 0) {
       const impliedPercent = subtotalCents > 0 ? (toCents(discount) / subtotalCents) * 100 : 0
-      assertDiscountAllowed(role, impliedPercent)
+      assertDiscountAllowed(maxDiscountPercent, impliedPercent)
     }
 
     const existingAmountCents = sumCents(order.payments.map((p) => p.amount))
@@ -109,9 +110,9 @@ export async function recordPayment(params: {
  * ONLY thing that ever sets status to 'paid' — recordPayment above
  * deliberately stops short of it.
  */
-export async function confirmOrderPayment(params: { orderId: string; userId: string; role: string }) {
-  const { orderId, userId, role } = params
-  if (role !== 'admin' && role !== 'cashier') {
+export async function confirmOrderPayment(params: { orderId: string; userId: string; permissions: string[] }) {
+  const { orderId, userId, permissions } = params
+  if (!permissions.includes('payments.confirm')) {
     throw new ForbiddenError('Only cashier or admin can confirm a payment as received')
   }
 

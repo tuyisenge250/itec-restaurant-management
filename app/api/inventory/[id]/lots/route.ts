@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 
@@ -8,7 +8,7 @@ import { handleApiError } from '@/lib/api-error'
 // be consumed next.
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole('admin', 'kitchen')
+    await requirePermission('inventory.view_costing')
     const { id } = await params
 
     const [lifoLots, fifoLots] = await Promise.all([

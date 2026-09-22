@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { createExpenseCategorySchema } from '@/lib/validation/expense.schema'
 import { listExpenseCategories, createExpenseCategory } from '@/lib/services/expense.service'
 import { handleApiError } from '@/lib/api-error'
 
 export async function GET(req: NextRequest) {
   try {
-    await requireRole('admin')
+    await requirePermission('expenses.manage')
     const isActiveParam = req.nextUrl.searchParams.get('isActive')
     const isActive = isActiveParam === null ? undefined : isActiveParam === 'true'
 
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await requireRole('admin')
+    await requirePermission('expenses.manage')
     const body = createExpenseCategorySchema.parse(await req.json())
     const category = await createExpenseCategory(body)
     return NextResponse.json(category, { status: 201 })

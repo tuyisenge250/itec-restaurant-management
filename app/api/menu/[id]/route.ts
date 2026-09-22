@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
-import { requireUser, requireRole } from '@/lib/auth/session'
+import { requireUser, requirePermission } from '@/lib/auth/session'
 import { updateMenuItemSchema } from '@/lib/validation/menu.schema'
 import { writeAuditLog } from '@/lib/audit'
 import { prisma } from '@/lib/db/prisma'
@@ -23,7 +23,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await requireRole('admin')
+    const user = await requirePermission('menu.manage')
     const { id } = await params
     const body = updateMenuItemSchema.parse(await req.json())
 
@@ -57,7 +57,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 // protects it — everything else is a real delete.
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole('admin')
+    await requirePermission('menu.manage')
     const { id } = await params
     await prisma.menuItem.delete({ where: { id } })
     return new NextResponse(null, { status: 204 })

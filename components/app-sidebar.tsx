@@ -60,7 +60,7 @@ export function AppSidebar({ role }: { role: Role }) {
       </SidebarHeader>
 
       <SidebarContent>
-        {user?.role === 'admin' && (
+        {user?.role.homeArea === 'admin' && (
           <div className="px-3 pt-3">
             <div className="grid grid-cols-2 gap-1 rounded-md border border-sidebar-border bg-primary-foreground/10 p-1">
               {ACCOUNT_VIEWS.map((view) => {

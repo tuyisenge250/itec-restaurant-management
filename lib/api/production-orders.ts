@@ -10,7 +10,7 @@ import type { PrepProductionRun } from './prep-recipes'
 
 export type ProductionOrderStatus = 'pending' | 'fulfilled' | 'cancelled'
 export type ProductionSource = 'internal' | 'outside'
-export type ProductionAssignedRole = 'kitchen' | 'waiter'
+export type ProductionAssignedTeam = 'kitchen' | 'waiter'
 
 export type ProductionOrder = {
   id: string
@@ -18,7 +18,7 @@ export type ProductionOrder = {
   prepRecipe: { outputItem: { name: string; unit: string } }
   targetQuantity: number
   source: ProductionSource
-  assignedRole: ProductionAssignedRole | null
+  assignedTeam: ProductionAssignedTeam | null
   reservedIngredientCost: number | null
   status: ProductionOrderStatus
   notes: string | null
@@ -42,7 +42,7 @@ export type IngredientPreviewLine = {
 export type ProductionOrderFilters = {
   status?: ProductionOrderStatus
   source?: ProductionSource
-  assignedRole?: ProductionAssignedRole
+  assignedTeam?: ProductionAssignedTeam
 }
 
 export const getProductionOrders = (filters?: ProductionOrderFilters) => {

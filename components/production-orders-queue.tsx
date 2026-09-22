@@ -6,16 +6,16 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { FulfillProductionOrderDialog } from '@/components/fulfill-production-order-dialog'
-import { useProductionOrders, type ProductionOrder, type ProductionAssignedRole } from '@/lib/api/production-orders'
+import { useProductionOrders, type ProductionOrder, type ProductionAssignedTeam } from '@/lib/api/production-orders'
 
 // Orders admin has placed and assigned to this role — outside-sourced orders
 // never show here (receiving those is admin's job), and neither does an
 // order assigned to the OTHER role. Fulfilling one runs the actual batch,
 // tied back to the order so the plan-vs-actual gets tracked. Shared by the
 // kitchen and waiter pages — same queue mechanics, just scoped by role.
-export function ProductionOrdersQueue({ assignedRole }: { assignedRole: ProductionAssignedRole }) {
+export function ProductionOrdersQueue({ assignedTeam }: { assignedTeam: ProductionAssignedTeam }) {
   const [fulfillTarget, setFulfillTarget] = useState<ProductionOrder | null>(null)
-  const { data: orders = [], isLoading } = useProductionOrders({ status: 'pending', source: 'internal', assignedRole })
+  const { data: orders = [], isLoading } = useProductionOrders({ status: 'pending', source: 'internal', assignedTeam })
 
   if (isLoading) return <Skeleton className="h-16 w-full" />
   if (orders.length === 0) return null

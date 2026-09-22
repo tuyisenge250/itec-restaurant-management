@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { serveOrderItem } from '@/lib/services/order.service'
 import { handleApiError } from '@/lib/api-error'
 
@@ -10,10 +10,10 @@ import { handleApiError } from '@/lib/api-error'
 // kitchen never touches this endpoint.
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await requireRole('waiter', 'admin')
+    const user = await requirePermission('order_items.serve')
     const { id } = await params
 
-    const item = await serveOrderItem({ orderItemId: id, userId: user.sub, role: user.role })
+    const item = await serveOrderItem({ orderItemId: id, userId: user.sub, permissions: user.role.permissions })
     return NextResponse.json(item)
   } catch (err) {
     return handleApiError(err)

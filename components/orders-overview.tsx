@@ -239,7 +239,7 @@ export function OrdersOverview() {
   const [detailId, setDetailId] = useState<string | null>(null)
 
   const { data: users = [] } = useUsers()
-  const waiters = users.filter((u) => u.role === 'waiter')
+  const waiters = users.filter((u) => u.role.homeArea === 'waiter')
 
   const { data: orders = [], isLoading } = useOrders({
     filters: {

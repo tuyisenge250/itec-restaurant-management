@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { createSupplierSchema } from '@/lib/validation/purchase-order.schema'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 
 export async function GET() {
   try {
-    await requireRole('admin')
+    await requirePermission('suppliers.manage')
     const suppliers = await prisma.supplier.findMany({
       where: { isActive: true },
       orderBy: { name: 'asc' },
@@ -19,7 +19,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    await requireRole('admin')
+    await requirePermission('suppliers.manage')
     const body = createSupplierSchema.parse(await req.json())
     const supplier = await prisma.supplier.create({ data: body })
     return NextResponse.json(supplier, { status: 201 })

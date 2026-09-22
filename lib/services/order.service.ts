@@ -173,14 +173,14 @@ export async function updateOrderItems(params: {
   add: OrderItemInput[]
   removeItemIds: string[]
   userId: string
-  role: string
+  permissions: string[]
 }) {
-  const { orderId, add, removeItemIds, userId, role } = params
+  const { orderId, add, removeItemIds, userId, permissions } = params
 
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } })
     if (!order) throw new NotFoundError('Order not found')
-    if (role !== 'admin' && order.createdById !== userId) {
+    if (!permissions.includes('orders.manage_all') && order.createdById !== userId) {
       throw new ForbiddenError('Only the order\'s own waiter or an admin can edit its items')
     }
     if (order.status === 'paid' || order.status === 'payment_pending' || order.status === 'cancelled') {
@@ -230,10 +230,13 @@ export async function updateOrderItems(params: {
   })
 }
 
-const ROLE_ALLOWED_ORDER_ACTIONS: Record<string, ('preparing' | 'cancelled')[]> = {
-  admin: ['preparing', 'cancelled'],
-  kitchen: ['preparing'],
-  waiter: ['cancelled'],
+// Which permission unlocks each order-level action. 'preparing' is kitchen
+// claiming an order's pending prep items off the queue — tied to the same
+// capability as fulfilling those items. 'cancelled' is an ownership-scoped
+// action like the rest of order editing.
+function canPerformOrderAction(permissions: string[], action: 'preparing' | 'cancelled'): boolean {
+  if (action === 'preparing') return permissions.includes('order_items.fulfill_prep')
+  return permissions.includes('orders.manage_own') || permissions.includes('orders.manage_all')
 }
 
 /**
@@ -247,12 +250,12 @@ export async function updateOrderStatus(params: {
   orderId: string
   newStatus: 'preparing' | 'cancelled'
   userId: string
-  role: string
+  permissions: string[]
 }) {
-  const { orderId, newStatus, userId, role } = params
+  const { orderId, newStatus, userId, permissions } = params
 
-  if (!ROLE_ALLOWED_ORDER_ACTIONS[role]?.includes(newStatus)) {
-    throw new ForbiddenError(`${role} cannot perform this action`)
+  if (!canPerformOrderAction(permissions, newStatus)) {
+    throw new ForbiddenError('You do not have permission to perform this action')
   }
 
   return prisma.$transaction(async (tx) => {
@@ -266,7 +269,7 @@ export async function updateOrderStatus(params: {
 
     const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { items: true } })
 
-    if (role === 'waiter' && order.createdById !== userId) {
+    if (newStatus === 'cancelled' && !permissions.includes('orders.manage_all') && order.createdById !== userId) {
       throw new ForbiddenError('Only the order\'s own waiter or an admin can update it')
     }
 
@@ -325,8 +328,8 @@ export async function updateOrderStatus(params: {
  * hand-off — see serveOrderItem — so no item is ever fulfilled by the same
  * person who's about to hand it to the customer.
  */
-export async function markOrderItemReady(params: { orderItemId: string; userId: string; role: string }) {
-  const { orderItemId, userId, role } = params
+export async function markOrderItemReady(params: { orderItemId: string; userId: string; permissions: string[] }) {
+  const { orderItemId, userId, permissions } = params
 
   return prisma.$transaction(async (tx) => {
     const item = await tx.orderItem.findUnique({
@@ -336,17 +339,17 @@ export async function markOrderItemReady(params: { orderItemId: string; userId: 
     if (!item) throw new NotFoundError('Order item not found')
 
     if (item.requiresPreparation) {
-      if (role !== 'admin' && role !== 'kitchen') {
+      if (!permissions.includes('order_items.fulfill_prep')) {
         throw new ForbiddenError('Only kitchen or admin can mark a kitchen item ready')
       }
-      if (role === 'kitchen' && item.order.startedById && item.order.startedById !== userId) {
+      if (!permissions.includes('orders.manage_all') && item.order.startedById && item.order.startedById !== userId) {
         throw new ForbiddenError('This order is already being handled by another kitchen user')
       }
       if (item.status !== 'preparing') {
         throw new BusinessRuleError(`Cannot mark ready an item in status ${item.status}`)
       }
     } else {
-      if (role !== 'admin' && role !== 'cashier') {
+      if (!permissions.includes('order_items.fulfill_direct')) {
         throw new ForbiddenError('Only cashier or admin can mark a direct-serve item ready')
       }
       if (item.status !== 'pending') {
@@ -395,9 +398,9 @@ export async function markOrderItemReady(params: { orderItemId: string; userId: 
  * hands" record, never a stock-consuming action itself. Waiter-only (their
  * own order) or admin.
  */
-export async function serveOrderItem(params: { orderItemId: string; userId: string; role: string }) {
-  const { orderItemId, userId, role } = params
-  if (role !== 'admin' && role !== 'waiter') {
+export async function serveOrderItem(params: { orderItemId: string; userId: string; permissions: string[] }) {
+  const { orderItemId, userId, permissions } = params
+  if (!permissions.includes('order_items.serve')) {
     throw new ForbiddenError('Only a waiter or admin can serve an item')
   }
 
@@ -407,7 +410,7 @@ export async function serveOrderItem(params: { orderItemId: string; userId: stri
       include: { order: true },
     })
     if (!item) throw new NotFoundError('Order item not found')
-    if (role === 'waiter' && item.order.createdById !== userId) {
+    if (!permissions.includes('orders.manage_all') && item.order.createdById !== userId) {
       throw new ForbiddenError('Only the order\'s own waiter or an admin can serve its items')
     }
     if (item.status !== 'ready') {
@@ -442,9 +445,9 @@ export async function voidOrderItem(params: {
   orderItemId: string
   voidReason: string
   userId: string
-  role: string
+  permissions: string[]
 }) {
-  const { orderItemId, voidReason, userId, role } = params
+  const { orderItemId, voidReason, userId, permissions } = params
 
   return prisma.$transaction(async (tx) => {
     const orderItem = await tx.orderItem.findUnique({ where: { id: orderItemId }, include: { order: true } })
@@ -454,10 +457,10 @@ export async function voidOrderItem(params: {
     let stockAlreadyDeducted: boolean
 
     if (orderItem.requiresPreparation) {
-      if (role !== 'admin' && role !== 'kitchen') {
+      if (!permissions.includes('order_items.fulfill_prep')) {
         throw new ForbiddenError('Only kitchen or admin can void a kitchen item')
       }
-      if (role === 'kitchen' && orderItem.order.startedById && orderItem.order.startedById !== userId) {
+      if (!permissions.includes('orders.manage_all') && orderItem.order.startedById && orderItem.order.startedById !== userId) {
         throw new ForbiddenError('This order is already being handled by another kitchen user')
       }
       if (orderItem.status === 'pending') {
@@ -466,7 +469,7 @@ export async function voidOrderItem(params: {
       // Stock only actually leaves the shelf once a prep item reaches 'ready'.
       stockAlreadyDeducted = orderItem.status === 'ready' || orderItem.status === 'served'
     } else {
-      if (role !== 'admin' && role !== 'cashier') {
+      if (!permissions.includes('order_items.fulfill_direct')) {
         throw new ForbiddenError('Only cashier or admin can void a direct-serve item')
       }
       if (orderItem.status === 'pending') {
@@ -522,9 +525,9 @@ export async function splitOrder(params: {
   orderId: string
   items: { orderItemId: string; quantity: number }[]
   userId: string
-  role: string
+  permissions: string[]
 }) {
-  const { orderId, items: requestedItems, userId, role } = params
+  const { orderId, items: requestedItems, userId, permissions } = params
 
   const requestedIds = requestedItems.map((r) => r.orderItemId)
   if (new Set(requestedIds).size !== requestedIds.length) {
@@ -534,7 +537,7 @@ export async function splitOrder(params: {
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } })
     if (!order) throw new NotFoundError('Order not found')
-    if (role !== 'admin' && order.createdById !== userId) {
+    if (!permissions.includes('orders.manage_all') && order.createdById !== userId) {
       throw new ForbiddenError('Only the order\'s own waiter or an admin can split it')
     }
     if (order.status === 'paid' || order.status === 'payment_pending' || order.status === 'cancelled') {
@@ -616,9 +619,9 @@ export async function mergeOrders(params: {
   sourceOrderId: string
   targetOrderId: string
   userId: string
-  role: string
+  permissions: string[]
 }) {
-  const { sourceOrderId, targetOrderId, userId, role } = params
+  const { sourceOrderId, targetOrderId, userId, permissions } = params
   if (sourceOrderId === targetOrderId) throw new BusinessRuleError('Cannot merge an order into itself')
 
   return prisma.$transaction(async (tx) => {
@@ -629,7 +632,7 @@ export async function mergeOrders(params: {
     if (!source || !target) throw new NotFoundError('Order not found')
     // A waiter may only merge two orders they BOTH created — admin can merge
     // across waiters (e.g. tidying up after a mistake).
-    if (role !== 'admin' && (source.createdById !== userId || target.createdById !== userId)) {
+    if (!permissions.includes('orders.manage_all') && (source.createdById !== userId || target.createdById !== userId)) {
       throw new ForbiddenError('You can only merge orders you created')
     }
     const closedStatuses: (typeof source.status)[] = ['paid', 'payment_pending', 'cancelled']
@@ -668,17 +671,20 @@ export async function applyDiscount(params: {
   discountAmount?: number
   discountReason?: string
   userId: string
-  role: 'admin' | 'kitchen' | 'waiter' | 'cashier'
+  permissions: string[]
+  maxDiscountPercent: number
 }) {
-  const { orderId, discountPercent, discountAmount, discountReason, userId, role } = params
+  const { orderId, discountPercent, discountAmount, discountReason, userId, permissions, maxDiscountPercent } = params
 
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } })
     if (!order) throw new NotFoundError('Order not found')
-    // Only waiter is scoped to their own orders — admin and cashier (its
-    // oversight extends to every order, not just ones they created) can
-    // discount anything, just capped lower than admin by DISCOUNT_CAPS.
-    if (role === 'waiter' && order.createdById !== userId) {
+    // orders.discount_any (cashier's default) and orders.manage_all (admin's)
+    // both mean "discount anything" — only a role with neither, and no
+    // manage_all either (today: waiter, via orders.manage_own), is scoped to
+    // orders it created. Capped lower than admin by maxDiscountPercent either way.
+    const canDiscountAny = permissions.includes('orders.discount_any') || permissions.includes('orders.manage_all')
+    if (!canDiscountAny && order.createdById !== userId) {
       throw new ForbiddenError('Only the order\'s own waiter or an admin can apply a discount')
     }
     if (order.status === 'paid' || order.status === 'payment_pending' || order.status === 'cancelled') {
@@ -690,7 +696,7 @@ export async function applyDiscount(params: {
       .reduce((sum, i) => sum + i.priceAtSale * i.quantity, 0)
 
     const effectivePercent = discountPercent ?? (subtotal > 0 ? ((discountAmount ?? 0) / subtotal) * 100 : 0)
-    assertDiscountAllowed(role, effectivePercent)
+    assertDiscountAllowed(maxDiscountPercent, effectivePercent)
 
     const updated = await tx.order.update({
       where: { id: orderId },

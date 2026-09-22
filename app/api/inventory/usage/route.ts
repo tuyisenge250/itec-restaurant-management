@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 
@@ -9,7 +9,7 @@ import { handleApiError } from '@/lib/api-error'
 // Defaults to today when no date is given.
 export async function GET(req: NextRequest) {
   try {
-    await requireRole('admin', 'kitchen')
+    await requirePermission('inventory.view_costing')
     const dateParam = req.nextUrl.searchParams.get('date')
     const date = dateParam ? new Date(dateParam) : new Date()
     if (Number.isNaN(date.getTime())) {

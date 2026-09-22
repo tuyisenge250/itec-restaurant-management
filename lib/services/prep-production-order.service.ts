@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
-import type { Prisma, Role } from '@prisma/client'
+import type { Prisma, ProductionTeam } from '@prisma/client'
 import { runProductionBatch, scaleInputs, consumeScaledInputs } from './prep-recipe.service'
 import { reverseConsumption, simulateDrawCost } from './inventory.service'
 import { writeAuditLog } from '@/lib/audit'
@@ -21,13 +21,13 @@ export async function createProductionOrder(params: {
   prepRecipeId: string
   targetQuantity: number
   source: 'internal' | 'outside'
-  assignedRole?: 'kitchen' | 'waiter'
+  assignedTeam?: ProductionTeam
   notes?: string
   createdById: string
 }) {
-  const { prepRecipeId, targetQuantity, source, assignedRole, notes, createdById } = params
+  const { prepRecipeId, targetQuantity, source, assignedTeam, notes, createdById } = params
 
-  if (source === 'internal' && !assignedRole) {
+  if (source === 'internal' && !assignedTeam) {
     throw new BusinessRuleError('An in-house production order needs to be assigned to kitchen or waiter')
   }
 
@@ -40,7 +40,7 @@ export async function createProductionOrder(params: {
         prepRecipeId,
         targetQuantity,
         source,
-        assignedRole: source === 'internal' ? (assignedRole as Role) : null,
+        assignedTeam: source === 'internal' ? assignedTeam : null,
         notes,
         createdById,
       },
@@ -92,23 +92,31 @@ export async function fulfillProductionOrder(params: {
   costingMethod: 'fifo' | 'lifo'
   expiresAt?: Date | null
   recordedById: string
-  role: string
+  permissions: string[]
+  homeArea: string
 }) {
-  const { orderId, quantityProduced, laborCost, outsideCost, costingMethod, expiresAt, recordedById, role } = params
+  const { orderId, quantityProduced, laborCost, outsideCost, costingMethod, expiresAt, recordedById, permissions, homeArea } =
+    params
 
   return prisma.$transaction(async (tx) => {
     const [locked] = await tx.$queryRaw<
-      { id: string; status: string; source: string; assignedRole: string | null; prepRecipeId: string; reservedIngredientCost: number | null }[]
-    >`SELECT id, status, source, "assignedRole", "prepRecipeId", "reservedIngredientCost" FROM prep_production_orders WHERE id = ${orderId} FOR UPDATE`
+      { id: string; status: string; source: string; assignedTeam: string | null; prepRecipeId: string; reservedIngredientCost: number | null }[]
+    >`SELECT id, status, source, "assignedTeam", "prepRecipeId", "reservedIngredientCost" FROM prep_production_orders WHERE id = ${orderId} FOR UPDATE`
     if (!locked) throw new NotFoundError('Production order not found')
     if (locked.status !== 'pending') {
       throw new BusinessRuleError(`Cannot fulfill a production order in status ${locked.status}`)
     }
 
-    if (locked.source === 'internal' && role !== 'admin' && role !== locked.assignedRole) {
-      throw new ForbiddenError(`Only ${locked.assignedRole} or admin can fulfill this production order`)
+    // "Assigned team" (kitchen/waiter) is a business-routing concept, not a
+    // permission — matching it is who this order was planned for, same idea
+    // as stock-requisition.service.ts's LOCATION_HOME_AREA. fulfill_any
+    // bypasses the match entirely (also required for an outside order,
+    // since there's no in-house assignee to match against at all).
+    const canFulfillAny = permissions.includes('production_orders.fulfill_any')
+    if (locked.source === 'internal' && !canFulfillAny && homeArea !== locked.assignedTeam) {
+      throw new ForbiddenError(`Only ${locked.assignedTeam} or admin can fulfill this production order`)
     }
-    if (locked.source === 'outside' && role !== 'admin') {
+    if (locked.source === 'outside' && !canFulfillAny) {
       throw new ForbiddenError('Only admin can record an outside production order as received')
     }
 
@@ -159,9 +167,11 @@ async function reverseOutsideOrderConsumption(tx: TxClient, orderId: string, use
   }
 }
 
-export async function cancelProductionOrder(params: { orderId: string; userId: string; role: string }) {
-  const { orderId, userId, role } = params
-  if (role !== 'admin') throw new ForbiddenError('Only admin can cancel a production order')
+export async function cancelProductionOrder(params: { orderId: string; userId: string; permissions: string[] }) {
+  const { orderId, userId, permissions } = params
+  if (!permissions.includes('production_orders.manage')) {
+    throw new ForbiddenError('Only admin can cancel a production order')
+  }
 
   return prisma.$transaction(async (tx) => {
     const order = await tx.prepProductionOrder.findUnique({ where: { id: orderId } })

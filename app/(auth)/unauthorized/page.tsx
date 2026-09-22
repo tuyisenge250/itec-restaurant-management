@@ -5,7 +5,7 @@ import { ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useCurrentUser } from '@/lib/api/auth'
 
-const roleHome: Record<string, string> = {
+const homeAreaHome: Record<string, string> = {
   admin: '/admin',
   kitchen: '/kitchen/orders',
   waiter: '/waiter/orders',
@@ -14,7 +14,7 @@ const roleHome: Record<string, string> = {
 
 export default function UnauthorizedPage() {
   const { data: user } = useCurrentUser()
-  const home = user ? (roleHome[user.role] ?? '/login') : '/login'
+  const home = user ? (homeAreaHome[user.role.homeArea] ?? '/login') : '/login'
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-4 text-center">

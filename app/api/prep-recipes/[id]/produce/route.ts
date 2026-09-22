@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { producePrepRecipeSchema } from '@/lib/validation/prep-recipe.schema'
 import { producePrepRecipe } from '@/lib/services/prep-recipe.service'
 import { handleApiError } from '@/lib/api-error'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await requireRole('admin', 'kitchen')
+    const user = await requirePermission('prep_recipes.produce')
     const { id } = await params
     const body = producePrepRecipeSchema.parse(await req.json())
 

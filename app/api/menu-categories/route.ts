@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole, requireUser } from '@/lib/auth/session'
+import { requirePermission, requireUser } from '@/lib/auth/session'
 import { createMenuCategorySchema } from '@/lib/validation/menu.schema'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
@@ -16,7 +16,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    await requireRole('admin')
+    await requirePermission('menu.manage')
     const body = createMenuCategorySchema.parse(await req.json())
     const category = await prisma.menuCategory.create({ data: body })
     return NextResponse.json(category, { status: 201 })

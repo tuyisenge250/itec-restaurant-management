@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma, OrderStatus } from '@prisma/client'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { createOrderSchema } from '@/lib/validation/order.schema'
 import { createOrder } from '@/lib/services/order.service'
 import { prisma } from '@/lib/db/prisma'
@@ -11,7 +11,7 @@ const ORDER_STATUSES = Object.values(OrderStatus)
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireRole('waiter', 'admin')
+    const user = await requirePermission('orders.manage_own', 'orders.manage_all')
     const body = createOrderSchema.parse(await req.json())
     const order = await createOrder({ ...body, createdById: user.sub })
 
@@ -31,12 +31,14 @@ export async function POST(req: NextRequest) {
 // shows.
 export async function GET(req: NextRequest) {
   try {
-    const user = await requireRole('admin', 'kitchen', 'waiter', 'cashier')
+    const user = await requirePermission('orders.manage_own', 'orders.view_all')
     const { searchParams } = req.nextUrl
     const statusParam = searchParams.get('status')
     const status = ORDER_STATUSES.find((s) => s === statusParam)
     const table = searchParams.get('table') || undefined
-    const waiterId = user.role === 'waiter' ? user.sub : searchParams.get('waiterId') || undefined
+    const waiterId = !user.role.permissions.includes('orders.view_all')
+      ? user.sub
+      : searchParams.get('waiterId') || undefined
     const from = searchParams.get('from')
     const to = searchParams.get('to')
     // The kitchen/cashier boards must never see the other's item type (or

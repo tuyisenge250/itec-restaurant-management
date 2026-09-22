@@ -314,12 +314,12 @@ const productionOrderSchema = z
     prepRecipeId: z.string().min(1, 'Pick a recipe'),
     targetQuantity: z.coerce.number().positive(),
     source: z.enum(['internal', 'outside']),
-    assignedRole: z.enum(['kitchen', 'waiter']).optional(),
+    assignedTeam: z.enum(['kitchen', 'waiter']).optional(),
     notes: z.string().optional(),
   })
-  .refine((data) => data.source !== 'internal' || !!data.assignedRole, {
+  .refine((data) => data.source !== 'internal' || !!data.assignedTeam, {
     message: 'Pick who this goes to',
-    path: ['assignedRole'],
+    path: ['assignedTeam'],
   })
 type ProductionOrderFormValues = z.infer<typeof productionOrderSchema>
 
@@ -343,7 +343,7 @@ function ProductionOrderCard({ order, onFulfill, onCancel }: {
               {order.prepRecipe.outputItem.name}
               <Badge variant="secondary" className="flex items-center gap-1">
                 {order.source === 'outside' ? <Truck className="h-3 w-3" /> : <Home className="h-3 w-3" />}
-                {order.source === 'outside' ? 'Outside' : `In-house · ${order.assignedRole ? ASSIGNED_ROLE_LABELS[order.assignedRole] : 'unassigned'}`}
+                {order.source === 'outside' ? 'Outside' : `In-house · ${order.assignedTeam ? ASSIGNED_ROLE_LABELS[order.assignedTeam] : 'unassigned'}`}
               </Badge>
               <StatusBadge status={order.status} />
             </span>
@@ -390,7 +390,7 @@ function ProductionOrdersTab() {
   })
   const prepRecipeId = watch('prepRecipeId')
   const source = watch('source')
-  const assignedRole = watch('assignedRole')
+  const assignedTeam = watch('assignedTeam')
   const targetQuantity = watch('targetQuantity')
 
   const { data: preview, isLoading: previewLoading } = useIngredientPreview(prepRecipeId, targetQuantity)
@@ -399,7 +399,7 @@ function ProductionOrdersTab() {
   const outputUnit = prepRecipes.find((r) => r.id === prepRecipeId)?.outputItem.unit
 
   function openCreate() {
-    reset({ prepRecipeId: '', targetQuantity: 0, source: 'internal', assignedRole: undefined, notes: '' })
+    reset({ prepRecipeId: '', targetQuantity: 0, source: 'internal', assignedTeam: undefined, notes: '' })
     setCreateOpen(true)
   }
 
@@ -522,14 +522,14 @@ function ProductionOrdersTab() {
               <div className="flex flex-col gap-1.5">
                 <Label>Assign to</Label>
                 <div className="grid grid-cols-2 gap-2">
-                  <Button type="button" variant={assignedRole === 'kitchen' ? 'default' : 'outline'} onClick={() => setValue('assignedRole', 'kitchen')}>
+                  <Button type="button" variant={assignedTeam === 'kitchen' ? 'default' : 'outline'} onClick={() => setValue('assignedTeam', 'kitchen')}>
                     Kitchen
                   </Button>
-                  <Button type="button" variant={assignedRole === 'waiter' ? 'default' : 'outline'} onClick={() => setValue('assignedRole', 'waiter')}>
+                  <Button type="button" variant={assignedTeam === 'waiter' ? 'default' : 'outline'} onClick={() => setValue('assignedTeam', 'waiter')}>
                     Waiter
                   </Button>
                 </div>
-                {errors.assignedRole && <p className="text-xs text-destructive">{errors.assignedRole.message}</p>}
+                {errors.assignedTeam && <p className="text-xs text-destructive">{errors.assignedTeam.message}</p>}
               </div>
             )}
 

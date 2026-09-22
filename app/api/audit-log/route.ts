@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 import { BusinessRuleError } from '@/lib/errors'
@@ -9,7 +9,7 @@ const PAGE_SIZE = 50
 
 export async function GET(req: NextRequest) {
   try {
-    await requireRole('admin')
+    await requirePermission('audit_log.view')
     const { searchParams } = req.nextUrl
     const entityType = searchParams.get('entityType') ?? undefined
     const userId = searchParams.get('userId') ?? undefined

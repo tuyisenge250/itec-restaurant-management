@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { previewProductionOrderIngredients } from '@/lib/services/prep-production-order.service'
 import { BusinessRuleError } from '@/lib/errors'
 import { handleApiError } from '@/lib/api-error'
@@ -11,7 +11,7 @@ import { handleApiError } from '@/lib/api-error'
 // production order would draw before submitting it.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole('admin', 'kitchen', 'waiter')
+    await requirePermission('prep_recipes.view')
     const { id } = await params
     const targetQuantity = Number(req.nextUrl.searchParams.get('targetQuantity'))
     if (!targetQuantity || targetQuantity <= 0) {
