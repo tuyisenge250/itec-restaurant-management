@@ -31,8 +31,14 @@ export async function createPurchaseOrder(params: {
   notes?: string
   items: NewPOItem[]
   createdById: string
+  // Requisitions this PO is being created to cover (from the on_hold
+  // shortfall shortcuts) — purely a display link, so admin can see what's
+  // waiting on this PO and doesn't have to cross-reference manually. Only
+  // requisitions still on_hold get linked; anything already
+  // approved/rejected/cancelled in the meantime is left alone.
+  coveredRequisitionIds?: string[]
 }) {
-  const { supplierId, notes, items, createdById } = params
+  const { supplierId, notes, items, createdById, coveredRequisitionIds } = params
 
   const supplier = await prisma.supplier.findUnique({ where: { id: supplierId } })
   if (!supplier) throw new NotFoundError('Supplier not found')
@@ -40,15 +46,26 @@ export async function createPurchaseOrder(params: {
     throw new BusinessRuleError('Cannot create a purchase order against an inactive supplier')
   }
 
-  return prisma.purchaseOrder.create({
-    data: {
-      supplierId,
-      notes,
-      createdById,
-      status: 'draft',
-      items: { create: mergeDuplicateItems(items) },
-    },
-    include: { items: true, supplier: true },
+  return prisma.$transaction(async (tx) => {
+    const po = await tx.purchaseOrder.create({
+      data: {
+        supplierId,
+        notes,
+        createdById,
+        status: 'draft',
+        items: { create: mergeDuplicateItems(items) },
+      },
+      include: { items: true, supplier: true },
+    })
+
+    if (coveredRequisitionIds && coveredRequisitionIds.length > 0) {
+      await tx.stockRequisition.updateMany({
+        where: { id: { in: coveredRequisitionIds }, status: 'on_hold' },
+        data: { linkedPurchaseOrderId: po.id },
+      })
+    }
+
+    return po
   })
 }
 

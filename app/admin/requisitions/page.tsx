@@ -26,7 +26,7 @@ import { useSuppliers } from '@/lib/api/suppliers'
 import { useInventory } from '@/lib/api/inventory'
 import { useCurrentUser } from '@/lib/api/auth'
 import { createPurchaseOrderSchema } from '@/lib/validation/purchase-order.schema'
-import { cn } from '@/lib/utils'
+import { cn, formatPoNumber } from '@/lib/utils'
 import type { z } from 'zod'
 
 const LOCATION_LABEL: Record<StockLocation, string> = { kitchen: 'Kitchen', bar: 'Bar' }
@@ -36,6 +36,9 @@ type CreatePOFormValues = z.infer<typeof createPurchaseOrderSchema>
 // What's missing from Main to cover this requisition's approved quantities —
 // the seed data for the "Create purchase order" shortcut below.
 type ShortfallItem = { inventoryItemId: string; quantityOrdered: number }
+// Carries which requisition(s) a shortfall came from alongside the items
+// themselves, so the PO created from it can link back to them.
+type PoDraft = { items: ShortfallItem[]; coveredRequisitionIds: string[] }
 
 // Combines several pending requisitions into one shortfall list — sums
 // requested quantity per item across all of them (not "approved", since
@@ -65,7 +68,7 @@ function ReviewDialog({
   onClose: () => void
   projection: LocationStockProjection[]
   canCreatePO: boolean
-  onCreatePO: (items: ShortfallItem[]) => void
+  onCreatePO: (draft: PoDraft) => void
 }) {
   const approveMutation = useApproveStockRequisition()
   const rejectMutation = useRejectStockRequisition()
@@ -115,10 +118,11 @@ function ReviewDialog({
   // the PO dialog, so it doesn't just sit looking untouched while stock is
   // on order — already on_hold (e.g. reopened later) skips straight through.
   async function handleCreatePO() {
-    if (requisition?.status === 'pending') {
+    if (!requisition) return
+    if (requisition.status === 'pending') {
       await holdMutation.mutateAsync(requisition.id)
     }
-    onCreatePO(shortItems)
+    onCreatePO({ items: shortItems, coveredRequisitionIds: [requisition.id] })
   }
 
   const isSubmitting = approveMutation.isPending || rejectMutation.isPending || holdMutation.isPending
@@ -157,6 +161,21 @@ function ReviewDialog({
                 <div className="col-span-2">
                   <span className="text-muted-foreground">Received by</span>
                   <p className="font-medium">{requisition.receivedBy.name} · {new Date(requisition.receivedAt!).toLocaleString()}</p>
+                </div>
+              )}
+              {requisition.linkedPurchaseOrder && (
+                <div className="col-span-2">
+                  <span className="text-muted-foreground">Covered by purchase order</span>
+                  <p className="font-medium">
+                    {formatPoNumber(requisition.linkedPurchaseOrder.poNumber, requisition.linkedPurchaseOrder.createdAt)}
+                  </p>
+                  {requisition.linkedPurchaseOrder.status === 'received' ? (
+                    <p className="font-medium text-success">Stock has arrived — ready to approve</p>
+                  ) : (
+                    <p className="font-medium">
+                      <StatusBadge status={requisition.linkedPurchaseOrder.status} /> — check Purchase Orders for details
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -315,12 +334,13 @@ function AdjustDialog({ items, open, onClose }: { items: LocationStockProjection
 // approval/order/receive lifecycle as one created from scratch, just without
 // re-navigating to Purchase Orders and re-typing the items.
 function CreatePoFromShortfallDialog({
-  items, open, onClose,
+  draft, open, onClose,
 }: {
-  items: ShortfallItem[]
+  draft: PoDraft
   open: boolean
   onClose: () => void
 }) {
+  const { items, coveredRequisitionIds } = draft
   const { data: suppliers = [] } = useSuppliers()
   const { data: inventory = [] } = useInventory()
   const createMutation = useCreatePurchaseOrder()
@@ -341,6 +361,7 @@ function CreatePoFromShortfallDialog({
       items: items.length > 0
         ? items.map((i) => ({ inventoryItemId: i.inventoryItemId, quantityOrdered: i.quantityOrdered, unitCost: 0 }))
         : [{ inventoryItemId: '', quantityOrdered: 1, unitCost: 0 }],
+      coveredRequisitionIds,
     })
   }
 
@@ -421,7 +442,7 @@ function CreatePoFromShortfallDialog({
 export default function AdminRequisitionsPage() {
   const [reviewTarget, setReviewTarget] = useState<StockRequisition | null>(null)
   const [adjustOpen, setAdjustOpen] = useState(false)
-  const [poShortfallItems, setPoShortfallItems] = useState<ShortfallItem[] | null>(null)
+  const [poDraft, setPoDraft] = useState<PoDraft | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const { data: requisitions = [], isLoading } = useStockRequisitions()
@@ -456,7 +477,7 @@ export default function AdminRequisitionsPage() {
     await Promise.all(
       selected.filter((r) => r.status === 'pending').map((r) => holdMutation.mutateAsync(r.id))
     )
-    setPoShortfallItems(aggregateShortfall(selected, projection))
+    setPoDraft({ items: aggregateShortfall(selected, projection), coveredRequisitionIds: selected.map((r) => r.id) })
   }
 
   const combinedCount = selectedIds.size
@@ -556,7 +577,14 @@ export default function AdminRequisitionsPage() {
                     )}
                     <TableCell className="font-medium">{LOCATION_LABEL[req.location]}</TableCell>
                     <TableCell>{req.items.length}</TableCell>
-                    <TableCell><StatusBadge status={req.status} /></TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1.5">
+                        <StatusBadge status={req.status} />
+                        {req.status === 'on_hold' && req.linkedPurchaseOrder?.status === 'received' && (
+                          <span className="text-xs font-medium text-success">stock arrived</span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{req.requestedBy.name}</TableCell>
                     <TableCell className="text-muted-foreground">{new Date(req.createdAt).toLocaleString()}</TableCell>
                     <TableCell className="text-right">
@@ -577,13 +605,13 @@ export default function AdminRequisitionsPage() {
         onClose={() => setReviewTarget(null)}
         projection={projection}
         canCreatePO={canCreatePO}
-        onCreatePO={(items) => { setReviewTarget(null); setPoShortfallItems(items) }}
+        onCreatePO={(draft) => { setReviewTarget(null); setPoDraft(draft) }}
       />
       <AdjustDialog items={projection} open={adjustOpen} onClose={() => setAdjustOpen(false)} />
       <CreatePoFromShortfallDialog
-        items={poShortfallItems ?? []}
-        open={poShortfallItems !== null}
-        onClose={() => setPoShortfallItems(null)}
+        draft={poDraft ?? { items: [], coveredRequisitionIds: [] }}
+        open={poDraft !== null}
+        onClose={() => setPoDraft(null)}
       />
     </div>
   )

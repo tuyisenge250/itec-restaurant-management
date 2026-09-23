@@ -13,6 +13,7 @@ export async function GET() {
       include: {
         supplier: { select: { name: true } },
         items: { include: { inventoryItem: { select: { name: true, unit: true } } } },
+        coveredRequisitions: { select: { id: true, location: true, status: true } },
       },
     })
     return NextResponse.json(purchaseOrders)

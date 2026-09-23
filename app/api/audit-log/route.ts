@@ -13,6 +13,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl
     const entityType = searchParams.get('entityType') ?? undefined
     const userId = searchParams.get('userId') ?? undefined
+    const action = searchParams.get('action') ?? undefined
     const from = searchParams.get('from')
     const to = searchParams.get('to')
     const page = Math.max(1, Number(searchParams.get('page') ?? '1'))
@@ -21,6 +22,7 @@ export async function GET(req: NextRequest) {
     const where = {
       entityType,
       userId,
+      action: action ? { in: action.split(',') } : undefined,
       createdAt: from || to ? { gte: from ? new Date(from) : undefined, lte: to ? parseUpperBoundDate(to) : undefined } : undefined,
     }
 

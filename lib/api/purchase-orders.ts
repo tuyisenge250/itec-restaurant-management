@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
 import { toast } from 'sonner'
 import type { z } from 'zod'
+import type { StockLocation, StockRequisitionStatus } from '@/lib/api/stock-requisitions'
 import {
   createPurchaseOrderSchema,
   receivePurchaseOrderSchema,
@@ -16,9 +17,10 @@ export type PurchaseOrderStatus =
   | 'received'
   | 'cancelled'
 export type PurchaseOrder = {
-  id: string; status: PurchaseOrderStatus; createdAt: string
+  id: string; poNumber: number; status: PurchaseOrderStatus; createdAt: string
   supplier: { name: string }
   items: { id: string; inventoryItemId: string; quantityOrdered: number; quantityReceived: number; unitCost: number; inventoryItem: { name: string; unit: string } }[]
+  coveredRequisitions: { id: string; location: StockLocation; status: StockRequisitionStatus }[]
 }
 export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>
 export type ReceivePurchaseOrderInput = z.infer<typeof receivePurchaseOrderSchema>
@@ -41,9 +43,10 @@ export type PurchaseOrderDetail = PurchaseOrder & {
   approvedBy: { name: string } | null
   approvedAt: string | null
   reorderedFromId: string | null
-  reorderedFrom: { id: string; createdAt: string } | null
+  reorderedFrom: { id: string; poNumber: number; createdAt: string } | null
   goodsReceipts: {
     id: string
+    grnNumber: number
     receivedAt: string
     notes: string | null
     receivedBy: { name: string }

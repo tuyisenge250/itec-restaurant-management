@@ -22,7 +22,7 @@ import {
 import { useSuppliers } from '@/lib/api/suppliers'
 import { useInventory } from '@/lib/api/inventory'
 import { createPurchaseOrderSchema } from '@/lib/validation/purchase-order.schema'
-import { rwf } from '@/lib/utils'
+import { rwf, formatPoNumber, formatGrnNumber } from '@/lib/utils'
 import type { z } from 'zod'
 
 type CreateFormValues = z.infer<typeof createPurchaseOrderSchema>
@@ -74,7 +74,7 @@ function PurchaseOrderDetailDialog({ poId, onClose }: { poId: string | null; onC
   return (
     <Dialog open={!!poId} onOpenChange={(o) => { if (!o) { resetPaymentForm(); onClose() } }}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Purchase order detail</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{po ? formatPoNumber(po.poNumber, po.createdAt) : 'Purchase order detail'}</DialogTitle></DialogHeader>
         {isLoading || !po ? (
           <Skeleton className="h-64 w-full" />
         ) : (
@@ -90,7 +90,7 @@ function PurchaseOrderDetailDialog({ poId, onClose }: { poId: string | null; onC
               {po.reorderedFrom && (
                 <div className="col-span-2">
                   <span className="text-muted-foreground">Reordered from</span>
-                  <p className="font-medium">PO #{po.reorderedFrom.id.slice(0, 8)} ({new Date(po.reorderedFrom.createdAt).toLocaleDateString()})</p>
+                  <p className="font-medium">{formatPoNumber(po.reorderedFrom.poNumber, po.reorderedFrom.createdAt)}</p>
                 </div>
               )}
               {po.notes && (
@@ -122,15 +122,38 @@ function PurchaseOrderDetailDialog({ poId, onClose }: { poId: string | null; onC
               </Table>
             </div>
 
+            {po.coveredRequisitions.length > 0 && (
+              <div>
+                <p className="mb-2 text-sm font-medium">Covers {po.coveredRequisitions.length} requisition{po.coveredRequisitions.length === 1 ? '' : 's'}</p>
+                <div className="flex flex-col gap-1.5 rounded-md border border-border p-3">
+                  {po.coveredRequisitions.map((r) => (
+                    <div key={r.id} className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">{r.location === 'kitchen' ? 'Kitchen' : 'Bar'} requisition</span>
+                      <StatusBadge status={r.status} />
+                    </div>
+                  ))}
+                  {po.status !== 'received' && po.status !== 'cancelled'
+                    && po.coveredRequisitions.every((r) => r.status === 'rejected' || r.status === 'cancelled') && (
+                    <p className="mt-1 text-xs text-warning-foreground">
+                      No requisition still needs this — every one it was covering was rejected or cancelled.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {po.goodsReceipts.length > 0 && (
               <div>
                 <p className="mb-2 text-sm font-medium">Goods receipts</p>
                 <div className="flex flex-col gap-2">
                   {po.goodsReceipts.map((gr) => (
                     <div key={gr.id} className="rounded-md border border-border p-3 text-sm">
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>Received by <span className="font-medium text-foreground">{gr.receivedBy.name}</span></span>
-                        <span>{new Date(gr.receivedAt).toLocaleString()}</span>
+                      <div className="flex justify-between">
+                        <span className="font-medium">{formatGrnNumber(gr.grnNumber, gr.receivedAt)}</span>
+                        <span className="text-muted-foreground">{new Date(gr.receivedAt).toLocaleString()}</span>
+                      </div>
+                      <div className="text-muted-foreground">
+                        Received by <span className="font-medium text-foreground">{gr.receivedBy.name}</span>
                       </div>
                       <ul className="mt-1 flex flex-col gap-0.5">
                         {gr.lines.map((line) => (
@@ -351,6 +374,7 @@ export default function PurchaseOrdersPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>PO #</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Items</TableHead>
@@ -364,6 +388,7 @@ export default function PurchaseOrdersPage() {
                   const totalCost = po.items.reduce((s, i) => s + i.quantityOrdered * i.unitCost, 0)
                   return (
                     <TableRow key={po.id} className="hover:bg-accent cursor-pointer" onClick={() => setDetailId(po.id)}>
+                      <TableCell className="font-medium">{formatPoNumber(po.poNumber, po.createdAt)}</TableCell>
                       <TableCell className="font-medium">{po.supplier.name}</TableCell>
                       <TableCell><StatusBadge status={po.status} /></TableCell>
                       <TableCell>{po.items.length}</TableCell>
@@ -449,10 +474,12 @@ export default function PurchaseOrdersPage() {
       <Dialog open={!!receivePO} onOpenChange={(o) => { if (!o) { setReceivePO(null); setReceiveLines({}) } }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Receive Stock — {receivePO?.supplier.name}</DialogTitle>
+            <DialogTitle>
+              Receive Stock — {receivePO && `${formatPoNumber(receivePO.poNumber, receivePO.createdAt)} · `}{receivePO?.supplier.name}
+            </DialogTitle>
           </DialogHeader>
           <p className="text-xs text-muted-foreground -mt-2">
-            This closes the purchase order immediately. Whatever quantities you confirm here are final — there's no second receiving round for what's left over.
+            This closes the purchase order immediately. Whatever quantities you confirm here are final — there&apos;s no second receiving round for what&apos;s left over.
           </p>
           <div className="flex flex-col gap-3">
             <div className="grid grid-cols-[1fr_100px_110px_130px] gap-2 text-xs font-medium text-muted-foreground px-1">

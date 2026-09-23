@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
         requestedBy: { select: { name: true } },
         reviewedBy: { select: { name: true } },
         receivedBy: { select: { name: true } },
+        linkedPurchaseOrder: { select: { id: true, poNumber: true, status: true, createdAt: true } },
       },
       take: 200,
     })

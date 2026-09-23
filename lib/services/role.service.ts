@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db/prisma'
 import type { HomeArea } from '@prisma/client'
 import { writeAuditLog } from '@/lib/audit'
 import { BusinessRuleError, ConflictError, NotFoundError } from '@/lib/errors'
+import { isPrivilegedPermissionSet } from '@/lib/permissions'
 
 /**
  * Guards against an admin editing a role's permissions down to the point
@@ -12,8 +13,7 @@ import { BusinessRuleError, ConflictError, NotFoundError } from '@/lib/errors'
  * OTHER active user's role would still hold both.
  */
 async function assertKeepsRoleManagementReachable(roleId: string, newPermissions: string[]) {
-  const stillKeepsBoth = newPermissions.includes('roles.manage') && newPermissions.includes('users.manage')
-  if (stillKeepsBoth) return
+  if (isPrivilegedPermissionSet(newPermissions)) return
 
   const othersWithBoth = await prisma.user.count({
     where: {
@@ -41,6 +41,15 @@ export async function createRole(params: {
   return prisma.$transaction(async (tx) => {
     const role = await tx.role.create({ data })
     await writeAuditLog(tx, { userId, action: 'role.created', entityType: 'Role', entityId: role.id, afterData: role })
+    if (isPrivilegedPermissionSet(role.permissions)) {
+      await writeAuditLog(tx, {
+        userId,
+        action: 'role.privilege_escalation',
+        entityType: 'Role',
+        entityId: role.id,
+        afterData: { name: role.name, permissions: role.permissions },
+      })
+    }
     return role
   })
 }
@@ -72,6 +81,19 @@ export async function updateRole(params: {
       beforeData: before,
       afterData: updated,
     })
+    // Flag only the transition into privileged status, not every save of a
+    // role that already held it — otherwise an unrelated name/discount edit
+    // on the Admin role would trip the same alarm every time.
+    if (isPrivilegedPermissionSet(updated.permissions) && !isPrivilegedPermissionSet(before.permissions)) {
+      await writeAuditLog(tx, {
+        userId,
+        action: 'role.privilege_escalation',
+        entityType: 'Role',
+        entityId: roleId,
+        beforeData: { name: before.name, permissions: before.permissions },
+        afterData: { name: updated.name, permissions: updated.permissions },
+      })
+    }
     return updated
   })
 }

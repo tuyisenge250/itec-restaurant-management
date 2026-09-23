@@ -22,7 +22,7 @@ export async function GET(
           items: { include: { inventoryItem: { select: { name: true, unit: true } } } },
           createdBy: { select: { name: true } },
           approvedBy: { select: { name: true } },
-          reorderedFrom: { select: { id: true, createdAt: true } },
+          reorderedFrom: { select: { id: true, poNumber: true, createdAt: true } },
           goodsReceipts: {
             orderBy: { receivedAt: 'desc' },
             include: {
@@ -38,6 +38,7 @@ export async function GET(
             orderBy: { createdAt: 'desc' },
             include: { recordedBy: { select: { name: true } } },
           },
+          coveredRequisitions: { select: { id: true, location: true, status: true } },
         },
       }),
       prisma.auditLog.findMany({

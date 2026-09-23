@@ -22,6 +22,7 @@ const REQUISITION_DETAIL_INCLUDE = {
   requestedBy: { select: { name: true } },
   reviewedBy: { select: { name: true } },
   receivedBy: { select: { name: true } },
+  linkedPurchaseOrder: { select: { id: true, poNumber: true, status: true, createdAt: true } },
 } satisfies Prisma.StockRequisitionInclude
 
 /**

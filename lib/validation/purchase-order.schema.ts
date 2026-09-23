@@ -29,6 +29,9 @@ export const createPurchaseOrderSchema = z.object({
       })
     )
     .min(1),
+  // Requisitions this PO covers — set by the on_hold "Create PO" / "Combine
+  // into PO" shortcuts, absent for a PO created from scratch.
+  coveredRequisitionIds: z.array(z.string()).optional(),
 })
 
 export const updatePurchaseOrderStatusSchema = z.object({

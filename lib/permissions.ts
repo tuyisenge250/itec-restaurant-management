@@ -84,3 +84,14 @@ export const PERMISSION_KEYS = PERMISSIONS.map((p) => p.key)
 export type PermissionKey = (typeof PERMISSION_KEYS)[number]
 
 export const PERMISSION_CATEGORIES = [...new Set(PERMISSIONS.map((p) => p.category))]
+
+// The two keys that together let someone reach the role/user management
+// surface at all. Holding both is what role.service.ts's and
+// user.service.ts's lockout guards protect, and what makes a permission
+// change worth flagging as a privilege escalation in the audit log — see
+// isPrivilegedPermissionSet below.
+export const PRIVILEGED_PERMISSION_KEYS = ['roles.manage', 'users.manage'] as const
+
+export function isPrivilegedPermissionSet(permissions: string[]) {
+  return PRIVILEGED_PERMISSION_KEYS.every((key) => permissions.includes(key))
+}

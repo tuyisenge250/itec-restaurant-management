@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
 import { toast } from 'sonner'
 import type { z } from 'zod'
+import type { PurchaseOrderStatus } from '@/lib/api/purchase-orders'
 import {
   createRequisitionSchema,
   approveRequisitionSchema,
@@ -37,6 +38,9 @@ export type StockRequisition = {
   receivedAt: string | null
   createdAt: string
   items: StockRequisitionItem[]
+  // The PO created to cover this requisition's shortfall, if any — set by
+  // the on_hold "Create PO" / "Combine into PO" shortcuts.
+  linkedPurchaseOrder: { id: string; poNumber: number; status: PurchaseOrderStatus; createdAt: string } | null
 }
 
 export type CreateRequisitionInput = z.infer<typeof createRequisitionSchema>

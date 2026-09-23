@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, ShieldCheck, Loader2, Pencil, Trash2 } from 'lucide-react'
+import { Plus, ShieldCheck, ShieldAlert, Loader2, Pencil, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
@@ -21,8 +21,55 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel,
 } from '@/components/ui/alert-dialog'
 import { useRoles, useCreateRole, useUpdateRole, useDeleteRole, type Role, type HomeArea, type CreateRoleInput } from '@/lib/api/roles'
+import { useAuditLog, type AuditLogEntry } from '@/lib/api/audit-log'
 import { PERMISSIONS, PERMISSION_CATEGORIES, PERMISSION_KEYS } from '@/lib/permissions'
 import { createRoleSchema } from '@/lib/validation/role.schema'
+
+const PRIVILEGE_ESCALATION_ACTIONS = 'role.privilege_escalation,user.privilege_escalation'
+
+// role.service.ts writes 'role.privilege_escalation' when a role's edited
+// permissions newly grant roles.manage+users.manage; user.service.ts writes
+// 'user.privilege_escalation' when a user is reassigned onto a role that
+// already held both. Both land here as a lightweight review trail — nobody
+// is blocked from making the change, it's just made visible after the fact.
+function describePrivilegeEscalation(entry: AuditLogEntry): string {
+  if (entry.entityType === 'Role') {
+    const after = entry.afterData as { name?: string } | null
+    return `Role "${after?.name ?? 'Unknown'}" was granted full role & user management`
+  }
+  const before = entry.beforeData as { role?: string } | null
+  const after = entry.afterData as { role?: string } | null
+  return `Moved to "${after?.role ?? 'Unknown'}" role (from "${before?.role ?? 'Unknown'}") — can now manage roles & users`
+}
+
+function PrivilegeEscalationPanel() {
+  const { data } = useAuditLog({ action: PRIVILEGE_ESCALATION_ACTIONS, page: 1 })
+  const entries = data?.entries ?? []
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-2 p-4">
+        <p className="flex items-center gap-1.5 text-sm font-medium">
+          <ShieldAlert className="h-3.5 w-3.5" />Recent privilege changes
+        </p>
+        {entries.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No role or user has been granted role/user management recently.</p>
+        ) : (
+          <ul className="flex flex-col gap-1.5">
+            {entries.slice(0, 5).map((entry) => (
+              <li key={entry.id} className="flex justify-between gap-4 text-sm">
+                <span>
+                  {describePrivilegeEscalation(entry)} — by <span className="font-medium">{entry.user?.name ?? 'Unknown'}</span>
+                </span>
+                <span className="shrink-0 text-muted-foreground">{new Date(entry.createdAt).toLocaleString()}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 const HOME_AREA_LABEL: Record<HomeArea, string> = { admin: 'Admin', kitchen: 'Kitchen', waiter: 'Waiter', cashier: 'Cashier' }
 const homeAreaBadge: Record<HomeArea, string> = {
@@ -110,6 +157,8 @@ export default function RolesPage() {
         description="Create custom roles and control exactly what each one can do"
         action={<Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" />New role</Button>}
       />
+
+      <PrivilegeEscalationPanel />
 
       <Card>
         <CardContent className="p-0">

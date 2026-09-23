@@ -8,4 +8,13 @@ export function rwf(amount: number) {
 export function menuItemLabel(name: string, variantLabel: string | null | undefined) {
   return variantLabel ? `${name} · ${variantLabel}` : name
 }
+// poNumber/grnNumber are global autoincrements (see prisma/schema.prisma) —
+// the year here is just display context from when the record was created,
+// not part of the sequence, so it never resets and never collides.
+export function formatPoNumber(poNumber: number, createdAt: string | Date) {
+  return `PO-${new Date(createdAt).getFullYear()}-${String(poNumber).padStart(4, '0')}`
+}
+export function formatGrnNumber(grnNumber: number, receivedAt: string | Date) {
+  return `GRN-${new Date(receivedAt).getFullYear()}-${String(grnNumber).padStart(4, '0')}`
+}
 export { cn } from "cn"

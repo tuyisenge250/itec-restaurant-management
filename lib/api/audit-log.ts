@@ -13,7 +13,7 @@ export type AuditLogEntry = {
   createdAt: string
 }
 export type AuditLogPage = { entries: AuditLogEntry[]; total: number; page: number; pageSize: number }
-export type AuditLogFilters = { entityType?: string; userId?: string; from?: string; to?: string; page?: number }
+export type AuditLogFilters = { entityType?: string; userId?: string; action?: string; from?: string; to?: string; page?: number }
 
 export const getAuditLog = (filters: AuditLogFilters) => {
   const entries = Object.entries(filters)

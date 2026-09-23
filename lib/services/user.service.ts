@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/db/prisma'
 import { writeAuditLog } from '@/lib/audit'
 import { BusinessRuleError, NotFoundError } from '@/lib/errors'
+import { isPrivilegedPermissionSet } from '@/lib/permissions'
 
 const USER_SELECT = {
   id: true,
@@ -32,13 +33,12 @@ async function assertUserChangeKeepsRoleManagementReachable(params: {
   const current = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } })
   if (!current) throw new NotFoundError('User not found')
 
-  const currentlyHoldsBoth = current.role.permissions.includes('roles.manage') && current.role.permissions.includes('users.manage')
-  if (!currentlyHoldsBoth) return
+  if (!isPrivilegedPermissionSet(current.role.permissions)) return
 
   let stillHoldsBoth = nextIsActive
   if (stillHoldsBoth && nextRoleId && nextRoleId !== current.roleId) {
     const nextRole = await prisma.role.findUnique({ where: { id: nextRoleId } })
-    stillHoldsBoth = !!nextRole && nextRole.permissions.includes('roles.manage') && nextRole.permissions.includes('users.manage')
+    stillHoldsBoth = !!nextRole && isPrivilegedPermissionSet(nextRole.permissions)
   }
   if (stillHoldsBoth) return
 
@@ -89,6 +89,23 @@ export async function updateUser(params: {
     })
   }
 
+  // Detect the user (not the role) newly gaining privileged status via
+  // reassignment — role.service.ts flags a role's own permissions changing,
+  // this is the other way someone ends up privileged: moved onto a role
+  // that already held roles.manage+users.manage.
+  let privilegeEscalation: { fromRole: string; toRole: string } | null = null
+  if (data.roleId !== undefined) {
+    const [currentUser, nextRole] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId }, include: { role: true } }),
+      prisma.role.findUnique({ where: { id: data.roleId } }),
+    ])
+    if (currentUser && nextRole && currentUser.roleId !== nextRole.id) {
+      if (isPrivilegedPermissionSet(nextRole.permissions) && !isPrivilegedPermissionSet(currentUser.role.permissions)) {
+        privilegeEscalation = { fromRole: currentUser.role.name, toRole: nextRole.name }
+      }
+    }
+  }
+
   const { password, ...rest } = data
   const updateData: Record<string, unknown> = { ...rest }
   if (password) updateData.passwordHash = await bcrypt.hash(password, 10)
@@ -105,6 +122,16 @@ export async function updateUser(params: {
       beforeData: before,
       afterData: updated,
     })
+    if (privilegeEscalation) {
+      await writeAuditLog(tx, {
+        userId: actorId,
+        action: 'user.privilege_escalation',
+        entityType: 'User',
+        entityId: userId,
+        beforeData: { role: privilegeEscalation.fromRole },
+        afterData: { role: privilegeEscalation.toRole },
+      })
+    }
     return updated
   })
 }

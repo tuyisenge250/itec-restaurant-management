@@ -113,6 +113,12 @@ enum PurchaseOrderStatus {
 
 model PurchaseOrder {
   id              String              @id @default(cuid())
+  // Human-facing sequence number (PO-<createdAt year>-<padded poNumber>, see
+  // lib/utils.ts's formatPoNumber) — a Postgres-native autoincrement, so it's
+  // gap-free-enough and race-safe under concurrent creates without a manual
+  // counter table. Never resets per year; the year in the formatted string
+  // is cosmetic context, not part of the sequence.
+  poNumber        Int                 @unique @default(autoincrement())
   supplierId      String
   supplier        Supplier            @relation(fields: [supplierId], references: [id])
   status          PurchaseOrderStatus @default(draft)
@@ -131,6 +137,8 @@ model PurchaseOrder {
   items         PurchaseOrderItem[]
   goodsReceipts GoodsReceipt[]
   payments      SupplierPayment[]
+  // Requisitions this PO was created to cover — see StockRequisition.linkedPurchaseOrder.
+  coveredRequisitions StockRequisition[]
 
   @@map("purchase_orders")
 }
@@ -175,6 +183,8 @@ model PurchaseOrderItem {
 // Each line creates (or adds to) an InventoryLot, tagged with a costing method at receipt time.
 model GoodsReceipt {
   id              String        @id @default(cuid())
+  // Same idea as PurchaseOrder.poNumber, formatted as GRN-<year>-<padded>.
+  grnNumber       Int           @unique @default(autoincrement())
   purchaseOrderId String
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
   receivedById    String
@@ -474,6 +484,14 @@ model StockRequisition {
   receivedBy    User?                  @relation("RequisitionReceivedBy", fields: [receivedById], references: [id])
   receivedAt    DateTime?
   createdAt     DateTime               @default(now())
+
+  // Set when a PO gets created to cover this requisition's shortfall (the
+  // "Create PO" / "Combine into PO" shortcuts) — purely informational, so
+  // admin can see what's covering an on_hold requisition and when it's
+  // arrived, instead of having to remember and cross-reference manually.
+  // Not itself a status gate: approve/reject/cancel don't check it.
+  linkedPurchaseOrderId String?
+  linkedPurchaseOrder   PurchaseOrder? @relation(fields: [linkedPurchaseOrderId], references: [id])
 
   items StockRequisitionItem[]
 
