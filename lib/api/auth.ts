@@ -18,5 +18,9 @@ export type CurrentUser = {
 export const getMe = () => apiFetch<CurrentUser>('/api/auth/me')
 
 export function useCurrentUser() {
-  return useQuery({ queryKey: ['me'], queryFn: getMe, retry: false })
+  // Drives permission-gated nav/actions — the whole point of "instant"
+  // permission changes falls apart if the client trusts a stale cached
+  // role. staleTime: 0 overrides the app-wide 30s default so this always
+  // refetches on mount and on window refocus instead of serving cache.
+  return useQuery({ queryKey: ['me'], queryFn: getMe, retry: false, staleTime: 0 })
 }

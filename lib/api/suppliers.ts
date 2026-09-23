@@ -12,7 +12,7 @@ export type CreateSupplierInput = z.infer<typeof createSupplierSchema>
 
 export type SupplierHistoryOrder = {
   id: string
-  status: 'draft' | 'pending_approval' | 'ordered' | 'partially_received' | 'received' | 'cancelled'
+  status: 'draft' | 'pending_approval' | 'ordered' | 'received' | 'cancelled'
   createdAt: string
   orderedValue: number
   receivedValue: number

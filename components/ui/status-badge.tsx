@@ -2,11 +2,12 @@ import { Badge } from '@/components/ui/badge'
 
 type Status =
   | 'pending' | 'preparing' | 'ready' | 'served' | 'payment_pending' | 'paid' | 'cancelled'
-  | 'draft' | 'pending_approval' | 'ordered' | 'partially_received' | 'received'
-  | 'active' | 'inactive' | 'low_stock' | 'fulfilled' | 'approved' | 'rejected'
+  | 'draft' | 'pending_approval' | 'ordered' | 'received'
+  | 'active' | 'inactive' | 'low_stock' | 'fulfilled' | 'approved' | 'rejected' | 'on_hold'
 
 const config: Record<Status, { label: string; className: string }> = {
   pending:            { label: 'Pending',            className: 'border border-border bg-muted text-foreground' },
+  on_hold:            { label: 'On hold',             className: 'border border-warning/30 bg-warning/60 text-warning-foreground' },
   preparing:          { label: 'Preparing',          className: 'border border-warning/30 bg-warning text-warning-foreground' },
   ready:              { label: 'Ready',              className: 'border border-success/20 bg-success text-success-foreground' },
   served:             { label: 'Served',             className: 'border border-primary/10 bg-secondary text-secondary-foreground' },
@@ -16,7 +17,6 @@ const config: Record<Status, { label: string; className: string }> = {
   draft:              { label: 'Draft',              className: 'border border-border bg-muted text-foreground' },
   pending_approval:   { label: 'Pending approval',   className: 'border border-warning/30 bg-warning/60 text-warning-foreground' },
   ordered:            { label: 'Ordered',            className: 'border border-warning/30 bg-warning text-warning-foreground' },
-  partially_received: { label: 'Partial',            className: 'border border-border bg-secondary text-secondary-foreground' },
   received:           { label: 'Received',           className: 'border border-success/20 bg-success text-success-foreground' },
   active:             { label: 'Active',             className: 'border border-success/20 bg-success text-success-foreground' },
   inactive:           { label: 'Inactive',           className: 'border border-border bg-muted text-foreground' },

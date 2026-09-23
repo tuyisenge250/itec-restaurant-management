@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { Boxes, Loader2, PencilLine, Check, X } from 'lucide-react'
+import { useForm, useFieldArray } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { Boxes, Loader2, PencilLine, Check, X, ShoppingCart, AlertTriangle, Plus, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -9,23 +11,72 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
 import {
-  useStockRequisitions, useApproveStockRequisition, useRejectStockRequisition,
+  useStockRequisitions, useApproveStockRequisition, useRejectStockRequisition, useHoldStockRequisition,
   type StockRequisition, type StockLocation,
 } from '@/lib/api/stock-requisitions'
 import { useLocationStockProjection, useAdjustLocationStock, type LocationStockProjection } from '@/lib/api/location-stock'
+import { useCreatePurchaseOrder } from '@/lib/api/purchase-orders'
+import { useSuppliers } from '@/lib/api/suppliers'
+import { useInventory } from '@/lib/api/inventory'
+import { useCurrentUser } from '@/lib/api/auth'
+import { createPurchaseOrderSchema } from '@/lib/validation/purchase-order.schema'
+import { cn } from '@/lib/utils'
+import type { z } from 'zod'
 
 const LOCATION_LABEL: Record<StockLocation, string> = { kitchen: 'Kitchen', bar: 'Bar' }
+const EPSILON = 1e-6
 
-function ReviewDialog({ requisition, onClose }: { requisition: StockRequisition | null; onClose: () => void }) {
+type CreatePOFormValues = z.infer<typeof createPurchaseOrderSchema>
+// What's missing from Main to cover this requisition's approved quantities —
+// the seed data for the "Create purchase order" shortcut below.
+type ShortfallItem = { inventoryItemId: string; quantityOrdered: number }
+
+// Combines several pending requisitions into one shortfall list — sums
+// requested quantity per item across all of them (not "approved", since
+// none of these have been reviewed yet), then nets out current Main stock
+// so the PO only covers what's actually missing, same shortfall logic as
+// the single-requisition version above just aggregated across many.
+function aggregateShortfall(requisitions: StockRequisition[], projection: LocationStockProjection[]): ShortfallItem[] {
+  const mainStockById = new Map(projection.map((p) => [p.id, p.main]))
+  const totalRequested = new Map<string, number>()
+  for (const req of requisitions) {
+    for (const item of req.items) {
+      totalRequested.set(item.inventoryItemId, (totalRequested.get(item.inventoryItemId) ?? 0) + item.quantityRequested)
+    }
+  }
+  const result: ShortfallItem[] = []
+  for (const [inventoryItemId, requested] of totalRequested) {
+    const shortfall = requested - (mainStockById.get(inventoryItemId) ?? 0)
+    if (shortfall > EPSILON) result.push({ inventoryItemId, quantityOrdered: Math.round(shortfall * 100) / 100 })
+  }
+  return result
+}
+
+function ReviewDialog({
+  requisition, onClose, projection, canCreatePO, onCreatePO,
+}: {
+  requisition: StockRequisition | null
+  onClose: () => void
+  projection: LocationStockProjection[]
+  canCreatePO: boolean
+  onCreatePO: (items: ShortfallItem[]) => void
+}) {
   const approveMutation = useApproveStockRequisition()
   const rejectMutation = useRejectStockRequisition()
+  const holdMutation = useHoldStockRequisition()
   const [approvedQty, setApprovedQty] = useState<Record<string, number>>({})
   const [reviewNotes, setReviewNotes] = useState('')
+
+  // pending = never looked at; on_hold = reviewed, blocked on Main stock, a
+  // PO was created for it — both are still "awaiting a decision" and get
+  // the same actionable UI (approve/reject/notes), just a different badge.
+  const isActionable = requisition?.status === 'pending' || requisition?.status === 'on_hold'
 
   // "Adjusting state during render" (React's recommended pattern for
   // resetting state on prop change) rather than an effect — keyed on the id
@@ -35,9 +86,9 @@ function ReviewDialog({ requisition, onClose }: { requisition: StockRequisition 
   const [seededForId, setSeededForId] = useState<string | null>(null)
   if ((requisition?.id ?? null) !== seededForId) {
     setSeededForId(requisition?.id ?? null)
-    if (requisition && requisition.status === 'pending') {
+    if (requisition && isActionable) {
       const defaults: Record<string, number> = {}
-      requisition.items.forEach((item) => { defaults[item.id] = item.quantityRequested })
+      requisition.items.forEach((item) => { defaults[item.id] = item.quantityApproved ?? item.quantityRequested })
       setApprovedQty(defaults)
     } else {
       setApprovedQty({})
@@ -60,12 +111,32 @@ function ReviewDialog({ requisition, onClose }: { requisition: StockRequisition 
     onClose()
   }
 
-  const isPending = requisition?.status === 'pending'
-  const isSubmitting = approveMutation.isPending || rejectMutation.isPending
+  // Marks it reviewed-but-blocked (pending -> on_hold) before handing off to
+  // the PO dialog, so it doesn't just sit looking untouched while stock is
+  // on order — already on_hold (e.g. reopened later) skips straight through.
+  async function handleCreatePO() {
+    if (requisition?.status === 'pending') {
+      await holdMutation.mutateAsync(requisition.id)
+    }
+    onCreatePO(shortItems)
+  }
+
+  const isSubmitting = approveMutation.isPending || rejectMutation.isPending || holdMutation.isPending
+
+  const mainStockById = new Map(projection.map((p) => [p.id, p.main]))
+  const shortItems: ShortfallItem[] = isActionable && requisition
+    ? requisition.items.reduce<ShortfallItem[]>((acc, item) => {
+        const approved = approvedQty[item.id] ?? 0
+        const main = mainStockById.get(item.inventoryItemId) ?? 0
+        const shortfall = approved - main
+        if (shortfall > EPSILON) acc.push({ inventoryItemId: item.inventoryItemId, quantityOrdered: Math.round(shortfall * 100) / 100 })
+        return acc
+      }, [])
+    : []
 
   return (
     <Dialog open={!!requisition} onOpenChange={(o) => { if (!o) { setApprovedQty({}); onClose() } }}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{LOCATION_LABEL[requisition?.location ?? 'kitchen']} requisition — {requisition && <StatusBadge status={requisition.status} />}</DialogTitle>
         </DialogHeader>
@@ -91,31 +162,55 @@ function ReviewDialog({ requisition, onClose }: { requisition: StockRequisition 
             </div>
 
             <div className="flex flex-col gap-2">
-              <div className="grid grid-cols-[1fr_90px_90px_90px] gap-2 text-xs font-medium text-muted-foreground px-1">
+              <div className="grid grid-cols-[1fr_80px_80px_80px_80px] gap-2 text-xs font-medium text-muted-foreground px-1">
                 <span>Item</span>
                 <span className="text-right">Requested</span>
-                <span className="text-right">{isPending ? 'Approve' : 'Approved'}</span>
+                {isActionable && <span className="text-right">Main stock</span>}
+                <span className="text-right">{isActionable ? 'Approve' : 'Approved'}</span>
                 <span className="text-right">Received</span>
               </div>
-              {requisition.items.map((item) => (
-                <div key={item.id} className="grid grid-cols-[1fr_90px_90px_90px] gap-2 items-center">
-                  <span className="text-sm">{item.inventoryItem.name} <span className="text-muted-foreground">({item.inventoryItem.unit})</span></span>
-                  <span className="text-right text-sm">{item.quantityRequested}</span>
-                  {isPending ? (
-                    <Input
-                      type="number" min={0} step="0.01" className="h-8 text-right"
-                      value={approvedQty[item.id] ?? 0}
-                      onChange={(e) => setApprovedQty((prev) => ({ ...prev, [item.id]: Number(e.target.value) }))}
-                    />
-                  ) : (
-                    <span className="text-right text-sm">{item.quantityApproved ?? '—'}</span>
-                  )}
-                  <span className="text-right text-sm">{item.quantityReceived ?? '—'}</span>
-                </div>
-              ))}
+              {requisition.items.map((item) => {
+                const main = mainStockById.get(item.inventoryItemId) ?? 0
+                const approved = approvedQty[item.id] ?? 0
+                const short = isActionable && approved - main > EPSILON
+                return (
+                  <div key={item.id} className="grid grid-cols-[1fr_80px_80px_80px_80px] gap-2 items-center">
+                    <span className="text-sm">{item.inventoryItem.name} <span className="text-muted-foreground">({item.inventoryItem.unit})</span></span>
+                    <span className="text-right text-sm">{item.quantityRequested}</span>
+                    {isActionable && (
+                      <span className={cn('text-right text-sm', short && 'font-medium text-destructive')}>{main.toFixed(2)}</span>
+                    )}
+                    {isActionable ? (
+                      <Input
+                        type="number" min={0} step="0.01" className="h-8 text-right"
+                        value={approvedQty[item.id] ?? 0}
+                        onChange={(e) => setApprovedQty((prev) => ({ ...prev, [item.id]: Number(e.target.value) }))}
+                      />
+                    ) : (
+                      <span className="text-right text-sm">{item.quantityApproved ?? '—'}</span>
+                    )}
+                    <span className="text-right text-sm">{item.quantityReceived ?? '—'}</span>
+                  </div>
+                )
+              })}
             </div>
 
-            {isPending && (
+            {isActionable && shortItems.length > 0 && (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-warning/30 bg-warning/10 p-3">
+                <p className="flex items-start gap-1.5 text-xs text-warning-foreground">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 translate-y-0.5" />
+                  Main stock won&apos;t cover {shortItems.length === 1 ? 'this item' : `${shortItems.length} items`} at the quantities above — approving now will fail until it&apos;s restocked.
+                </p>
+                {canCreatePO && (
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" disabled={holdMutation.isPending} onClick={handleCreatePO}>
+                    {holdMutation.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <ShoppingCart className="mr-1 h-3.5 w-3.5" />}
+                    Create PO
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {isActionable && (
               <div className="flex flex-col gap-1.5">
                 <Label>Review notes <span className="text-muted-foreground">(required to send back)</span></Label>
                 <Input placeholder="Reason, or a note on what's being sent" value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} />
@@ -125,7 +220,7 @@ function ReviewDialog({ requisition, onClose }: { requisition: StockRequisition 
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => { setApprovedQty({}); onClose() }}>Close</Button>
-          {isPending && (
+          {isActionable && (
             <>
               <Button variant="destructive" disabled={isSubmitting || !reviewNotes} onClick={handleReject}>
                 {rejectMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -215,12 +310,156 @@ function AdjustDialog({ items, open, onClose }: { items: LocationStockProjection
   )
 }
 
+// Opened straight from a requisition's shortfall warning, pre-filled with
+// exactly what Main is short of. Saves as an ordinary draft PO — same
+// approval/order/receive lifecycle as one created from scratch, just without
+// re-navigating to Purchase Orders and re-typing the items.
+function CreatePoFromShortfallDialog({
+  items, open, onClose,
+}: {
+  items: ShortfallItem[]
+  open: boolean
+  onClose: () => void
+}) {
+  const { data: suppliers = [] } = useSuppliers()
+  const { data: inventory = [] } = useInventory()
+  const createMutation = useCreatePurchaseOrder()
+
+  const { register, handleSubmit, reset, setValue, watch, control, formState: { errors } } = useForm<CreatePOFormValues>({
+    resolver: zodResolver(createPurchaseOrderSchema),
+    defaultValues: { supplierId: '', items: [{ inventoryItemId: '', quantityOrdered: 1, unitCost: 0 }] },
+  })
+  const { fields, append, remove } = useFieldArray({ control, name: 'items' })
+
+  // Reseed whenever this opens with a new shortfall list — same "adjust
+  // state during render" pattern as ReviewDialog above.
+  const [seededFor, setSeededFor] = useState<ShortfallItem[] | null>(null)
+  if (open && items !== seededFor) {
+    setSeededFor(items)
+    reset({
+      supplierId: '',
+      items: items.length > 0
+        ? items.map((i) => ({ inventoryItemId: i.inventoryItemId, quantityOrdered: i.quantityOrdered, unitCost: 0 }))
+        : [{ inventoryItemId: '', quantityOrdered: 1, unitCost: 0 }],
+    })
+  }
+
+  async function onSubmit(values: CreatePOFormValues) {
+    await createMutation.mutateAsync(values)
+    onClose()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Create purchase order</DialogTitle></DialogHeader>
+        <p className="text-xs text-muted-foreground -mt-2">
+          Pre-filled with what&apos;s short on Main stock. Pick a supplier and confirm cost, then save as draft.
+        </p>
+        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1">
+            <Label>Supplier</Label>
+            <Select value={watch('supplierId') || null} onValueChange={(v) => v && setValue('supplierId', v)}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+              <SelectContent>
+                {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {errors.supplierId && <p className="text-xs text-destructive">{errors.supplierId.message}</p>}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <Label>Items</Label>
+              <Button type="button" size="sm" variant="outline"
+                onClick={() => append({ inventoryItemId: '', quantityOrdered: 1, unitCost: 0 })}>
+                <Plus className="h-3 w-3 mr-1" />Add item
+              </Button>
+            </div>
+            {fields.map((field, i) => (
+              <div key={field.id} className="grid grid-cols-[1fr_80px_80px_32px] gap-2 items-start">
+                <div>
+                  <Select
+                    value={watch(`items.${i}.inventoryItemId`) || null}
+                    onValueChange={(v) => v && setValue(`items.${i}.inventoryItemId`, v)}
+                  >
+                    <SelectTrigger className="w-full"><SelectValue placeholder="Item" /></SelectTrigger>
+                    <SelectContent>
+                      {inventory.map((item) => <SelectItem key={item.id} value={item.id}>{item.name} ({item.unit})</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {errors.items?.[i]?.inventoryItemId && <p className="text-xs text-destructive">{errors.items[i].inventoryItemId?.message}</p>}
+                </div>
+                <div>
+                  <Input type="number" placeholder="Qty" {...register(`items.${i}.quantityOrdered`, { valueAsNumber: true })} />
+                  {errors.items?.[i]?.quantityOrdered && <p className="text-xs text-destructive">{errors.items[i].quantityOrdered?.message}</p>}
+                </div>
+                <div>
+                  <Input type="number" placeholder="Cost" step="0.01" {...register(`items.${i}.unitCost`, { valueAsNumber: true })} />
+                  {errors.items?.[i]?.unitCost && <p className="text-xs text-destructive">{errors.items[i].unitCost?.message}</p>}
+                </div>
+                <Button type="button" size="icon" variant="ghost" onClick={() => remove(i)} disabled={fields.length === 1}>
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={createMutation.isPending}>
+              {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save as draft
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export default function AdminRequisitionsPage() {
   const [reviewTarget, setReviewTarget] = useState<StockRequisition | null>(null)
   const [adjustOpen, setAdjustOpen] = useState(false)
+  const [poShortfallItems, setPoShortfallItems] = useState<ShortfallItem[] | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const { data: requisitions = [], isLoading } = useStockRequisitions()
   const { data: projection = [], isLoading: projectionLoading } = useLocationStockProjection()
+  const { data: me } = useCurrentUser()
+  const canCreatePO = me?.role.permissions.includes('purchase_orders.manage') ?? false
+  const holdMutation = useHoldStockRequisition()
+
+  // Both still "awaiting a decision" and selectable for a combined PO —
+  // same reasoning as ReviewDialog's isActionable above.
+  const selectableRequisitions = requisitions.filter((r) => r.status === 'pending' || r.status === 'on_hold')
+  const allSelectableSelected = selectableRequisitions.length > 0 && selectableRequisitions.every((r) => selectedIds.has(r.id))
+
+  function toggleSelect(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(id); else next.delete(id)
+      return next
+    })
+  }
+
+  function toggleSelectAllPending(checked: boolean) {
+    setSelectedIds(checked ? new Set(selectableRequisitions.map((r) => r.id)) : new Set())
+  }
+
+  async function combineSelectedIntoPO() {
+    const selected = requisitions.filter((r) => selectedIds.has(r.id))
+    setSelectedIds(new Set())
+    // Same "mark reviewed" step as the single-requisition shortcut, just for
+    // every pending one in the batch at once — on_hold ones are skipped,
+    // they're already marked.
+    await Promise.all(
+      selected.filter((r) => r.status === 'pending').map((r) => holdMutation.mutateAsync(r.id))
+    )
+    setPoShortfallItems(aggregateShortfall(selected, projection))
+  }
+
+  const combinedCount = selectedIds.size
 
   return (
     <div className="flex flex-col gap-6">
@@ -263,6 +502,18 @@ export default function AdminRequisitionsPage() {
 
       <Card>
         <CardContent className="p-0">
+          {canCreatePO && combinedCount > 0 && (
+            <div className="flex items-center justify-between gap-3 border-b border-border bg-accent/60 px-4 py-2.5">
+              <span className="text-sm font-medium">{combinedCount} requisition{combinedCount === 1 ? '' : 's'} selected</span>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+                <Button size="sm" disabled={holdMutation.isPending} onClick={combineSelectedIntoPO}>
+                  {holdMutation.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <ShoppingCart className="mr-1 h-3.5 w-3.5" />}
+                  Combine into PO
+                </Button>
+              </div>
+            </div>
+          )}
           {isLoading ? (
             <div className="flex flex-col gap-2 p-4">
               {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
@@ -273,6 +524,15 @@ export default function AdminRequisitionsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  {canCreatePO && (
+                    <TableHead className="w-8">
+                      <Checkbox
+                        checked={allSelectableSelected}
+                        disabled={selectableRequisitions.length === 0}
+                        onCheckedChange={(checked) => toggleSelectAllPending(checked === true)}
+                      />
+                    </TableHead>
+                  )}
                   <TableHead>Location</TableHead>
                   <TableHead>Items</TableHead>
                   <TableHead>Status</TableHead>
@@ -284,13 +544,25 @@ export default function AdminRequisitionsPage() {
               <TableBody>
                 {requisitions.map((req) => (
                   <TableRow key={req.id} className="hover:bg-accent cursor-pointer" onClick={() => setReviewTarget(req)}>
+                    {canCreatePO && (
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        {(req.status === 'pending' || req.status === 'on_hold') && (
+                          <Checkbox
+                            checked={selectedIds.has(req.id)}
+                            onCheckedChange={(checked) => toggleSelect(req.id, checked === true)}
+                          />
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell className="font-medium">{LOCATION_LABEL[req.location]}</TableCell>
                     <TableCell>{req.items.length}</TableCell>
                     <TableCell><StatusBadge status={req.status} /></TableCell>
                     <TableCell className="text-muted-foreground">{req.requestedBy.name}</TableCell>
                     <TableCell className="text-muted-foreground">{new Date(req.createdAt).toLocaleString()}</TableCell>
                     <TableCell className="text-right">
-                      {req.status === 'pending' && <Button size="sm" onClick={(e) => { e.stopPropagation(); setReviewTarget(req) }}>Review</Button>}
+                      {(req.status === 'pending' || req.status === 'on_hold') && (
+                        <Button size="sm" onClick={(e) => { e.stopPropagation(); setReviewTarget(req) }}>Review</Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -300,8 +572,19 @@ export default function AdminRequisitionsPage() {
         </CardContent>
       </Card>
 
-      <ReviewDialog requisition={reviewTarget} onClose={() => setReviewTarget(null)} />
+      <ReviewDialog
+        requisition={reviewTarget}
+        onClose={() => setReviewTarget(null)}
+        projection={projection}
+        canCreatePO={canCreatePO}
+        onCreatePO={(items) => { setReviewTarget(null); setPoShortfallItems(items) }}
+      />
       <AdjustDialog items={projection} open={adjustOpen} onClose={() => setAdjustOpen(false)} />
+      <CreatePoFromShortfallDialog
+        items={poShortfallItems ?? []}
+        open={poShortfallItems !== null}
+        onClose={() => setPoShortfallItems(null)}
+      />
     </div>
   )
 }

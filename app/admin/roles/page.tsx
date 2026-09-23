@@ -21,7 +21,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel,
 } from '@/components/ui/alert-dialog'
 import { useRoles, useCreateRole, useUpdateRole, useDeleteRole, type Role, type HomeArea, type CreateRoleInput } from '@/lib/api/roles'
-import { PERMISSIONS, PERMISSION_CATEGORIES } from '@/lib/permissions'
+import { PERMISSIONS, PERMISSION_CATEGORIES, PERMISSION_KEYS } from '@/lib/permissions'
 import { createRoleSchema } from '@/lib/validation/role.schema'
 
 const HOME_AREA_LABEL: Record<HomeArea, string> = { admin: 'Admin', kitchen: 'Kitchen', waiter: 'Waiter', cashier: 'Cashier' }
@@ -52,6 +52,24 @@ export default function RolesPage() {
 
   function togglePermission(key: string, checked: boolean) {
     setValue('permissions', checked ? [...permissions, key] : permissions.filter((k) => k !== key))
+  }
+
+  function toggleCategory(category: string, checked: boolean) {
+    const categoryKeys = PERMISSIONS.filter((p) => p.category === category).map((p) => p.key)
+    setValue(
+      'permissions',
+      checked
+        ? [...new Set([...permissions, ...categoryKeys])]
+        : permissions.filter((k) => !categoryKeys.includes(k))
+    )
+  }
+
+  function selectAllPermissions() {
+    setValue('permissions', [...PERMISSION_KEYS])
+  }
+
+  function clearAllPermissions() {
+    setValue('permissions', [])
   }
 
   function openEdit(role: Role) {
@@ -167,21 +185,41 @@ export default function RolesPage() {
             </div>
 
             <div className="flex flex-col gap-3">
-              <Label>Permissions <span className="text-muted-foreground">({permissions.length} selected)</span></Label>
-              {PERMISSION_CATEGORIES.map((category) => (
-                <div key={category} className="flex flex-col gap-1.5 rounded-md border border-border p-3">
-                  <span className="text-xs font-medium text-muted-foreground">{category}</span>
-                  {PERMISSIONS.filter((p) => p.category === category).map((p) => (
-                    <label key={p.key} className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={permissions.includes(p.key)}
-                        onCheckedChange={(checked) => togglePermission(p.key, checked === true)}
-                      />
-                      {p.label}
-                    </label>
-                  ))}
+              <div className="flex items-center justify-between">
+                <Label>Permissions <span className="text-muted-foreground">({permissions.length} / {PERMISSION_KEYS.length} selected)</span></Label>
+                <div className="flex gap-1">
+                  <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={selectAllPermissions}>
+                    Select all
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={clearAllPermissions}>
+                    Clear all
+                  </Button>
                 </div>
-              ))}
+              </div>
+              {PERMISSION_CATEGORIES.map((category) => {
+                const categoryPermissions = PERMISSIONS.filter((p) => p.category === category)
+                const allInCategorySelected = categoryPermissions.every((p) => permissions.includes(p.key))
+                return (
+                  <div key={category} className="flex flex-col gap-1.5 rounded-md border border-border p-3">
+                    <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                      <Checkbox
+                        checked={allInCategorySelected}
+                        onCheckedChange={(checked) => toggleCategory(category, checked === true)}
+                      />
+                      {category}
+                    </label>
+                    {categoryPermissions.map((p) => (
+                      <label key={p.key} className="flex items-center gap-2 pl-6 text-sm">
+                        <Checkbox
+                          checked={permissions.includes(p.key)}
+                          onCheckedChange={(checked) => togglePermission(p.key, checked === true)}
+                        />
+                        {p.label}
+                      </label>
+                    ))}
+                  </div>
+                )
+              })}
             </div>
 
             <DialogFooter>

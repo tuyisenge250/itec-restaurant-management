@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import bcrypt from 'bcryptjs'
 import { requirePermission } from '@/lib/auth/session'
-import { writeAuditLog } from '@/lib/audit'
+import { createUser } from '@/lib/services/user.service'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 
@@ -41,24 +40,8 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const admin = await requirePermission('users.manage')
-    const { password, ...rest } = createUserSchema.parse(await req.json())
-    const passwordHash = await bcrypt.hash(password, 10)
-
-    const user = await prisma.$transaction(async (tx) => {
-      const created = await tx.user.create({
-        data: { ...rest, passwordHash },
-        select: USER_SELECT,
-      })
-      await writeAuditLog(tx, {
-        userId: admin.sub,
-        action: 'user.created',
-        entityType: 'User',
-        entityId: created.id,
-        afterData: created,
-      })
-      return created
-    })
-
+    const body = createUserSchema.parse(await req.json())
+    const user = await createUser({ ...body, actorId: admin.sub })
     return NextResponse.json(user, { status: 201 })
   } catch (err) {
     return handleApiError(err)

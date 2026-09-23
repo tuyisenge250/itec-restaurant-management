@@ -3,7 +3,7 @@ import type { PaymentMethod, PurchaseOrderStatus } from '@prisma/client'
 import { writeAuditLog } from '@/lib/audit'
 import { BusinessRuleError, NotFoundError } from '@/lib/errors'
 
-const PAYABLE_STATUSES: PurchaseOrderStatus[] = ['ordered', 'partially_received', 'received']
+const PAYABLE_STATUSES: PurchaseOrderStatus[] = ['ordered', 'received']
 
 /**
  * Records money actually paid to a supplier against a PO. Deliberately does

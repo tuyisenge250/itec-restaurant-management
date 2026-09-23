@@ -92,7 +92,7 @@ export async function approveRequisition(params: {
       SELECT id, status FROM stock_requisitions WHERE id = ${requisitionId} FOR UPDATE
     `
     if (!locked) throw new NotFoundError('Stock requisition not found')
-    if (locked.status !== 'pending') {
+    if (locked.status !== 'pending' && locked.status !== 'on_hold') {
       throw new BusinessRuleError(`Cannot approve a requisition in status ${locked.status}`)
     }
 
@@ -138,6 +138,47 @@ export async function approveRequisition(params: {
   })
 }
 
+/**
+ * Marks a requisition as reviewed-but-blocked: admin looked at it, Main
+ * doesn't have enough to cover it, and a purchase order was just created to
+ * fix that. Distinct from `pending` (never looked at) so it doesn't get
+ * mistaken for an untouched request — still not terminal, still shows up as
+ * needing a decision, just with a different reason. approve/reject/cancel
+ * all accept this status same as pending; the PO isn't linked here (the
+ * requisition doesn't know or care which PO covers it), it's purely a
+ * workflow marker.
+ */
+export async function holdRequisition(params: { requisitionId: string; userId: string; permissions: string[] }) {
+  const { requisitionId, userId, permissions } = params
+  if (!permissions.includes('requisitions.review')) {
+    throw new ForbiddenError('Only admin can put a stock requisition on hold')
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const requisition = await tx.stockRequisition.findUnique({ where: { id: requisitionId } })
+    if (!requisition) throw new NotFoundError('Stock requisition not found')
+    if (requisition.status !== 'pending') {
+      throw new BusinessRuleError(`Cannot put a requisition in status ${requisition.status} on hold`)
+    }
+
+    const updated = await tx.stockRequisition.update({
+      where: { id: requisitionId },
+      data: { status: 'on_hold', reviewedById: userId, reviewedAt: new Date() },
+    })
+
+    await writeAuditLog(tx, {
+      userId,
+      action: 'stock_requisition.on_hold',
+      entityType: 'StockRequisition',
+      entityId: requisitionId,
+      beforeData: { status: requisition.status },
+      afterData: { status: updated.status },
+    })
+
+    return updated
+  })
+}
+
 /** Admin sends it back — terminal, nothing was ever deducted so nothing to reverse. */
 export async function rejectRequisition(params: {
   requisitionId: string
@@ -153,7 +194,7 @@ export async function rejectRequisition(params: {
   return prisma.$transaction(async (tx) => {
     const requisition = await tx.stockRequisition.findUnique({ where: { id: requisitionId } })
     if (!requisition) throw new NotFoundError('Stock requisition not found')
-    if (requisition.status !== 'pending') {
+    if (requisition.status !== 'pending' && requisition.status !== 'on_hold') {
       throw new BusinessRuleError(`Cannot reject a requisition in status ${requisition.status}`)
     }
 
@@ -185,7 +226,7 @@ export async function cancelRequisition(params: { requisitionId: string; userId:
     if (!permissions.includes('requisitions.review') && requisition.requestedById !== userId) {
       throw new ForbiddenError('Only the requester or admin can cancel this requisition')
     }
-    if (requisition.status !== 'pending') {
+    if (requisition.status !== 'pending' && requisition.status !== 'on_hold') {
       throw new BusinessRuleError(`Cannot cancel a requisition in status ${requisition.status}`)
     }
 

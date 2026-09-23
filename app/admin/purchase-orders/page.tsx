@@ -38,7 +38,7 @@ const ACTION_LABELS: Record<string, string> = {
   'supplier_payment.recorded': 'Payment recorded',
 }
 
-const PAYABLE_STATUSES: PurchaseOrder['status'][] = ['ordered', 'partially_received', 'received']
+const PAYABLE_STATUSES: PurchaseOrder['status'][] = ['ordered', 'received']
 
 function PurchaseOrderDetailDialog({ poId, onClose }: { poId: string | null; onClose: () => void }) {
   const { data: po, isLoading } = usePurchaseOrder(poId ?? undefined)
@@ -312,7 +312,6 @@ export default function PurchaseOrdersPage() {
           </>
         )
       case 'ordered':
-      case 'partially_received':
         return (
           <>
             <Button size="sm" variant="outline" onClick={() => openReceive(po)}>
@@ -452,6 +451,9 @@ export default function PurchaseOrdersPage() {
           <DialogHeader>
             <DialogTitle>Receive Stock — {receivePO?.supplier.name}</DialogTitle>
           </DialogHeader>
+          <p className="text-xs text-muted-foreground -mt-2">
+            This closes the purchase order immediately. Whatever quantities you confirm here are final — there's no second receiving round for what's left over.
+          </p>
           <div className="flex flex-col gap-3">
             <div className="grid grid-cols-[1fr_100px_110px_130px] gap-2 text-xs font-medium text-muted-foreground px-1">
               <span>Item</span>

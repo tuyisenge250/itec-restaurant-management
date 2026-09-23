@@ -35,8 +35,13 @@ export function AppSidebar({ role }: { role: Role }) {
   const pathname = usePathname()
   const router = useRouter()
   const queryClient = useQueryClient()
-  const items = navByRole[role]
-  const { data: user } = useCurrentUser()
+  const { data: user, isLoading: userLoading } = useCurrentUser()
+  const permissions = user?.role.permissions ?? []
+  // Same OR logic as requirePermission server-side: an item with no
+  // `permissions` list is always shown (shell roots), otherwise it needs at
+  // least one of the listed keys — so a custom role only sees links to
+  // pages it can actually use, not the built-in role's full default set.
+  const items = navByRole[role].filter((item) => !item.permissions || item.permissions.some((p) => permissions.includes(p)))
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -88,6 +93,11 @@ export function AppSidebar({ role }: { role: Role }) {
         <SidebarGroup>
           <SidebarGroupLabel className="text-lg font-bold capitalize text-white">{role} menu</SidebarGroupLabel>
           <SidebarGroupContent>
+            {!userLoading && items.length === 0 && (
+              <p className="px-2 py-2 text-xs leading-relaxed text-primary-foreground/80">
+                Your role has no permissions granted yet — ask an admin to update it.
+              </p>
+            )}
             <SidebarMenu>
               {items.map((item) => {
                 const isActive = pathname === item.url

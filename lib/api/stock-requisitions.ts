@@ -10,7 +10,7 @@ import {
 } from '@/lib/validation/stock-requisition.schema'
 
 export type StockLocation = 'kitchen' | 'bar'
-export type StockRequisitionStatus = 'pending' | 'approved' | 'rejected' | 'received' | 'cancelled'
+export type StockRequisitionStatus = 'pending' | 'on_hold' | 'approved' | 'rejected' | 'received' | 'cancelled'
 
 export type StockRequisitionItem = {
   id: string
@@ -58,6 +58,8 @@ export const rejectStockRequisition = (id: string, data: RejectRequisitionInput)
   apiFetch<StockRequisition>(`/api/stock-requisitions/${id}/reject`, { method: 'POST', body: JSON.stringify(data) })
 export const cancelStockRequisition = (id: string) =>
   apiFetch<StockRequisition>(`/api/stock-requisitions/${id}/cancel`, { method: 'POST' })
+export const holdStockRequisition = (id: string) =>
+  apiFetch<StockRequisition>(`/api/stock-requisitions/${id}/hold`, { method: 'POST' })
 export const receiveStockRequisition = (id: string, data: ReceiveRequisitionInput) =>
   apiFetch<StockRequisition>(`/api/stock-requisitions/${id}/receive`, { method: 'POST', body: JSON.stringify(data) })
 
@@ -97,6 +99,14 @@ export function useCancelStockRequisition() {
   return useMutation({
     mutationFn: cancelStockRequisition,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['stock-requisitions'] }); toast.success('Requisition cancelled') },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+export function useHoldStockRequisition() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: holdStockRequisition,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['stock-requisitions'] }),
     onError: (e: Error) => toast.error(e.message),
   })
 }

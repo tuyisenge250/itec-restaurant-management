@@ -100,11 +100,13 @@ model Supplier {
 // PROCUREMENT (Purchase Order process)
 // ─────────────────────────────────────────────
 
+// No partially_received state: a PO can only be received once, and that
+// single goods-receipt event always closes it, whatever quantities actually
+// came in — see receiveGoodsForPurchaseOrder.
 enum PurchaseOrderStatus {
   draft
   pending_approval
   ordered
-  partially_received
   received
   cancelled
 }
@@ -444,6 +446,7 @@ enum StockLocation {
 
 enum StockRequisitionStatus {
   pending // awaiting admin review
+  on_hold // admin reviewed it, Main stock was short, a PO was created to cover it — not approved/rejected yet, revisit once stock arrives
   approved // admin sent it — ingredients already deducted from main stock, awaiting the location's receipt confirmation
   rejected // admin sent it back — terminal, nothing moved
   received // location confirmed what arrived — terminal, LocationStock credited

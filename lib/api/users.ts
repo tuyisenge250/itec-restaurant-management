@@ -30,7 +30,13 @@ export function useUpdateUser() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdateUserInput }) => updateUser(id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success('User updated') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      // Covers reassigning/deactivating the currently logged-in admin's own
+      // user record — their sidebar/permissions should reflect it right away.
+      qc.invalidateQueries({ queryKey: ['me'] })
+      toast.success('User updated')
+    },
     onError: (e: Error) => toast.error(e.message),
   })
 }

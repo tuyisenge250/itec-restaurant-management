@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import bcrypt from 'bcryptjs'
 import { requirePermission } from '@/lib/auth/session'
-import { writeAuditLog } from '@/lib/audit'
+import { updateUser, deactivateUser } from '@/lib/services/user.service'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
 
@@ -42,12 +41,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requirePermission('users.manage')
+    const admin = await requirePermission('users.manage')
     const { id } = await params
-    const { password, ...rest } = updateUserSchema.parse(await req.json())
-    const data: Record<string, unknown> = { ...rest }
-    if (password) data.passwordHash = await bcrypt.hash(password, 10)
-    const user = await prisma.user.update({ where: { id }, data, select })
+    const data = updateUserSchema.parse(await req.json())
+    const user = await updateUser({ userId: id, data, actorId: admin.sub })
     return NextResponse.json(user)
   } catch (err) {
     return handleApiError(err)
@@ -62,18 +59,7 @@ export async function DELETE(
   try {
     const admin = await requirePermission('users.manage')
     const { id } = await params
-
-    await prisma.$transaction(async (tx) => {
-      const updated = await tx.user.update({ where: { id }, data: { isActive: false }, select })
-      await writeAuditLog(tx, {
-        userId: admin.sub,
-        action: 'user.deactivated',
-        entityType: 'User',
-        entityId: id,
-        afterData: updated,
-      })
-    })
-
+    await deactivateUser({ userId: id, actorId: admin.sub })
     return new NextResponse(null, { status: 204 })
   } catch (err) {
     return handleApiError(err)

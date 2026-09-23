@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
 import Image from 'next/image'
 import { Eye, EyeOff, Loader2, ShieldCheck, ChefHat, ConciergeBell, Wallet } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -24,6 +25,7 @@ const homeAreaRedirect: Record<string, string> = {
 
 export default function LoginPage() {
   const router      = useRouter()
+  const queryClient = useQueryClient()
   const searchParams = useSearchParams()
   const next        = searchParams.get('next')
   const emailRef    = useRef<HTMLInputElement>(null)
@@ -47,6 +49,10 @@ export default function LoginPage() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? 'Login failed'); return }
+      // Same symmetry as logout's clear() — without this, switching accounts
+      // in the same tab (without a full page reload) can briefly show the
+      // previous session's cached role/permissions/data.
+      queryClient.clear()
       router.push(next && next.startsWith('/') ? next : (homeAreaRedirect[data.homeArea] ?? '/'))
     } catch {
       setError('Network error. Please try again.')

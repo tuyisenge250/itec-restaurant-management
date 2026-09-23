@@ -13,7 +13,6 @@ export type PurchaseOrderStatus =
   | 'draft'
   | 'pending_approval'
   | 'ordered'
-  | 'partially_received'
   | 'received'
   | 'cancelled'
 export type PurchaseOrder = {
@@ -67,10 +66,35 @@ export type PurchaseOrderDetail = PurchaseOrder & {
   }[]
 }
 
+// One supplier per PO already (it's a single field on the order, not per
+// line), so the only duplication left to guard against is the same product
+// appearing on more than one line — easy to end up with by combining several
+// requisitions' shortfalls or by hand-adding a row for an item that's
+// already there. Summed quantity, quantity-weighted average cost, so a
+// blended per-unit price survives even when the duplicate lines came in at
+// different costs.
+function mergeDuplicateItems(items: CreatePurchaseOrderInput['items']): CreatePurchaseOrderInput['items'] {
+  const merged = new Map<string, { inventoryItemId: string; quantityOrdered: number; unitCost: number }>()
+  for (const item of items) {
+    const existing = merged.get(item.inventoryItemId)
+    if (!existing) {
+      merged.set(item.inventoryItemId, { ...item })
+      continue
+    }
+    const totalQty = existing.quantityOrdered + item.quantityOrdered
+    existing.unitCost = (existing.unitCost * existing.quantityOrdered + item.unitCost * item.quantityOrdered) / totalQty
+    existing.quantityOrdered = totalQty
+  }
+  return [...merged.values()]
+}
+
 export const getPurchaseOrders = () => apiFetch<PurchaseOrder[]>('/api/purchase-orders')
 export const getPurchaseOrder = (id: string) => apiFetch<PurchaseOrderDetail>(`/api/purchase-orders/${id}`)
 export const createPurchaseOrder = (data: CreatePurchaseOrderInput) =>
-  apiFetch<PurchaseOrder>('/api/purchase-orders', { method: 'POST', body: JSON.stringify(data) })
+  apiFetch<PurchaseOrder>('/api/purchase-orders', {
+    method: 'POST',
+    body: JSON.stringify({ ...data, items: mergeDuplicateItems(data.items) }),
+  })
 export const receivePurchaseOrder = (id: string, data: ReceivePurchaseOrderInput) =>
   apiFetch<PurchaseOrder>(`/api/purchase-orders/${id}/receive`, { method: 'POST', body: JSON.stringify(data) })
 export const updatePurchaseOrderStatus = (id: string, data: UpdatePurchaseOrderStatusInput) =>
@@ -101,7 +125,7 @@ export function useReceivePurchaseOrder() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchase-orders'] })
       qc.invalidateQueries({ queryKey: ['inventory'] })
-      toast.success('Goods received')
+      toast.success('Goods received — purchase order closed')
     },
     onError: (e: Error) => toast.error(e.message),
   })

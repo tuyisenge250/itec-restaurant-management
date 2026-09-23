@@ -4,10 +4,32 @@ import { receiveGoodsLine } from './inventory.service'
 import { writeAuditLog } from '@/lib/audit'
 import { BusinessRuleError, NotFoundError } from '@/lib/errors'
 
+type NewPOItem = { inventoryItemId: string; quantityOrdered: number; unitCost: number }
+
+// The real boundary for this rule — the client already merges before
+// sending, but this is what actually decides what lands in the database, so
+// duplicate lines for the same product (however the caller built the list)
+// always collapse into one, summed quantity + quantity-weighted average
+// cost, rather than tracked as separate item rows.
+function mergeDuplicateItems(items: NewPOItem[]): NewPOItem[] {
+  const merged = new Map<string, NewPOItem>()
+  for (const item of items) {
+    const existing = merged.get(item.inventoryItemId)
+    if (!existing) {
+      merged.set(item.inventoryItemId, { ...item })
+      continue
+    }
+    const totalQty = existing.quantityOrdered + item.quantityOrdered
+    existing.unitCost = (existing.unitCost * existing.quantityOrdered + item.unitCost * item.quantityOrdered) / totalQty
+    existing.quantityOrdered = totalQty
+  }
+  return [...merged.values()]
+}
+
 export async function createPurchaseOrder(params: {
   supplierId: string
   notes?: string
-  items: { inventoryItemId: string; quantityOrdered: number; unitCost: number }[]
+  items: NewPOItem[]
   createdById: string
 }) {
   const { supplierId, notes, items, createdById } = params
@@ -24,7 +46,7 @@ export async function createPurchaseOrder(params: {
       notes,
       createdById,
       status: 'draft',
-      items: { create: items },
+      items: { create: mergeDuplicateItems(items) },
     },
     include: { items: true, supplier: true },
   })
@@ -33,8 +55,7 @@ export async function createPurchaseOrder(params: {
 const VALID_PO_TRANSITIONS: Record<PurchaseOrderStatus, PurchaseOrderStatus[]> = {
   draft: ['pending_approval', 'cancelled'],
   pending_approval: ['ordered', 'cancelled'],
-  ordered: ['partially_received', 'received', 'cancelled'],
-  partially_received: ['received', 'cancelled'],
+  ordered: ['received', 'cancelled'],
   received: [],
   cancelled: [],
 }
@@ -116,9 +137,14 @@ export async function reorderPurchaseOrder(purchaseOrderId: string, createdById:
 }
 
 /**
- * Records a goods receipt (full or partial) against a PO. Each line creates
+ * Records the (single, final) goods receipt against a PO. Each line creates
  * its own InventoryLot at the costing method the receiver picked for that
- * line, then rolls the PO's status up.
+ * line. A PO can only be received once — whatever quantities come in on
+ * this one event, the PO closes to `received` immediately after, even if
+ * some lines came in short. There's no partially_received status to leave
+ * it open in and no second receiving round: a shortfall is a supplier/PO
+ * problem to resolve via a new PO (e.g. reorderPurchaseOrder), not by
+ * reopening this one.
  */
 export async function receiveGoodsForPurchaseOrder(params: {
   purchaseOrderId: string
@@ -139,7 +165,7 @@ export async function receiveGoodsForPurchaseOrder(params: {
       include: { items: true },
     })
     if (!po) throw new NotFoundError('Purchase order not found')
-    if (po.status !== 'ordered' && po.status !== 'partially_received') {
+    if (po.status !== 'ordered') {
       throw new BusinessRuleError(`Cannot receive goods against a PO in status ${po.status}`)
     }
 
@@ -188,14 +214,9 @@ export async function receiveGoodsForPurchaseOrder(params: {
       })
     }
 
-    const updatedItems = await tx.purchaseOrderItem.findMany({ where: { purchaseOrderId } })
-    const allReceived = updatedItems.every((i) => i.quantityReceived >= i.quantityOrdered - 1e-6)
-    const anyReceived = updatedItems.some((i) => i.quantityReceived > 0)
-    const newStatus = allReceived ? 'received' : anyReceived ? 'partially_received' : po.status
-
     const updatedPO = await tx.purchaseOrder.update({
       where: { id: purchaseOrderId },
-      data: { status: newStatus },
+      data: { status: 'received' },
       include: { items: true },
     })
 
