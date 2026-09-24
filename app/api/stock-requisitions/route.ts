@@ -26,7 +26,12 @@ export async function GET(req: NextRequest) {
       where,
       orderBy: { createdAt: 'desc' },
       include: {
-        items: { include: { inventoryItem: { select: { name: true, unit: true } } } },
+        items: {
+          include: {
+            inventoryItem: { select: { name: true, unit: true } },
+            returns: { include: { returnedBy: { select: { name: true } } }, orderBy: { returnedAt: 'desc' } },
+          },
+        },
         requestedBy: { select: { name: true } },
         reviewedBy: { select: { name: true } },
         receivedBy: { select: { name: true } },

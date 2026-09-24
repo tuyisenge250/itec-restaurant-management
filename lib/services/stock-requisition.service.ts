@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import type { Prisma, StockLocation } from '@prisma/client'
-import { consumeStock } from './inventory.service'
+import { consumeStock, returnLocationStockToMain } from './inventory.service'
 import { writeAuditLog } from '@/lib/audit'
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '@/lib/errors'
 
@@ -18,7 +18,12 @@ const EPSILON = 1e-6
 const LOCATION_HOME_AREA: Record<StockLocation, string> = { kitchen: 'kitchen', bar: 'cashier' }
 
 const REQUISITION_DETAIL_INCLUDE = {
-  items: { include: { inventoryItem: { select: { name: true, unit: true } } } },
+  items: {
+    include: {
+      inventoryItem: { select: { name: true, unit: true } },
+      returns: { include: { returnedBy: { select: { name: true } } }, orderBy: { returnedAt: 'desc' } },
+    },
+  },
   requestedBy: { select: { name: true } },
   reviewedBy: { select: { name: true } },
   receivedBy: { select: { name: true } },
@@ -365,5 +370,66 @@ export async function adjustLocationStock(params: {
       beforeData: { quantity: currentQty },
       afterData: { quantity: currentQty + quantity },
     })
+  })
+}
+
+/**
+ * Excess/unused stock from a RECEIVED requisition line sent back to Main —
+ * same location-match rule as receiveRequisition (that location's own staff,
+ * or admin via requisitions.review). Capped at quantityReceived minus
+ * whatever was already returned for this line, so returning twice can't
+ * overdraw a location that never actually held that much.
+ */
+export async function recordLocationStockReturn(params: {
+  requisitionItemId: string
+  quantityReturned: number
+  reason: string
+  userId: string
+  permissions: string[]
+  homeArea: string
+}) {
+  const { requisitionItemId, quantityReturned, reason, userId, permissions, homeArea } = params
+
+  return prisma.$transaction(async (tx) => {
+    const item = await tx.stockRequisitionItem.findUnique({
+      where: { id: requisitionItemId },
+      include: { requisition: true, returns: true },
+    })
+    if (!item) throw new NotFoundError('Requisition line not found')
+    if (item.requisition.status !== 'received') {
+      throw new BusinessRuleError('Can only return stock from a received requisition')
+    }
+    if (!permissions.includes('requisitions.review') && homeArea !== LOCATION_HOME_AREA[item.requisition.location]) {
+      throw new ForbiddenError(`Only ${LOCATION_HOME_AREA[item.requisition.location]} or admin can return stock from this requisition`)
+    }
+
+    const alreadyReturned = item.returns.reduce((s, r) => s + r.quantityReturned, 0)
+    const returnable = (item.quantityReceived ?? 0) - alreadyReturned
+    if (quantityReturned > returnable + EPSILON) {
+      throw new BusinessRuleError(`Cannot return ${quantityReturned} — only ${returnable} of this line is still returnable`)
+    }
+
+    await returnLocationStockToMain(tx, {
+      inventoryItemId: item.inventoryItemId,
+      location: item.requisition.location,
+      quantity: quantityReturned,
+      referenceId: item.requisitionId,
+      recordedById: userId,
+      reason,
+    })
+
+    const created = await tx.locationStockReturn.create({
+      data: { stockRequisitionItemId: requisitionItemId, quantityReturned, reason, returnedById: userId },
+    })
+
+    await writeAuditLog(tx, {
+      userId,
+      action: 'stock_requisition.location_return',
+      entityType: 'StockRequisition',
+      entityId: item.requisitionId,
+      afterData: created,
+    })
+
+    return created
   })
 }

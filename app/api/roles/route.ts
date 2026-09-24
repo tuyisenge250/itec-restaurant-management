@@ -12,8 +12,11 @@ import { handleApiError } from '@/lib/api-error'
 export async function GET() {
   try {
     await requirePermission('roles.manage', 'users.manage')
-    const roles = await prisma.role.findMany({ orderBy: { name: 'asc' } })
-    return NextResponse.json(roles)
+    const roles = await prisma.role.findMany({
+      orderBy: { name: 'asc' },
+      include: { permissions: { select: { key: true } } },
+    })
+    return NextResponse.json(roles.map((r) => ({ ...r, permissions: r.permissions.map((p) => p.key) })))
   } catch (err) {
     return handleApiError(err)
   }

@@ -27,6 +27,7 @@ import {
   useInventoryLots, useInventoryTransactions, useAdjustStock, useAdjustLotPrice, useProducible,
   type InventoryItem, type InventoryItemType, type InventoryTransaction,
 } from '@/lib/api/inventory'
+import { useLocationStockProjection } from '@/lib/api/location-stock'
 import { useCreateMenuItem } from '@/lib/api/menu'
 import { useMenuCategories } from '@/lib/api/menu-categories'
 import { rwf } from '@/lib/utils'
@@ -209,7 +210,7 @@ function LotsPanel({ item }: { item: InventoryItem }) {
 
   return (
     <TableRow>
-      <TableCell colSpan={8} className="bg-muted/30 p-4">
+      <TableCell colSpan={10} className="bg-muted/30 p-4">
         {isLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : (
@@ -399,6 +400,8 @@ export default function InventoryPage() {
   const [menuCategoryId, setMenuCategoryId] = useState<string | undefined>(undefined)
 
   const { data: items = [], isLoading } = useInventory()
+  const { data: locationStock = [] } = useLocationStockProjection()
+  const locationStockById = new Map(locationStock.map((l) => [l.id, l]))
   const { data: menuCategories = [] } = useMenuCategories()
   const createMutation = useCreateInventoryItem()
   const updateMutation = useUpdateInventoryItem()
@@ -497,7 +500,9 @@ export default function InventoryPage() {
                   <TableHead>Item</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Unit</TableHead>
-                  <TableHead className="text-right">Current stock</TableHead>
+                  <TableHead className="text-right">Main stock</TableHead>
+                  <TableHead className="text-right">Kitchen stock</TableHead>
+                  <TableHead className="text-right">Cashier stock</TableHead>
                   <TableHead className="text-right">Value</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead />
@@ -506,6 +511,7 @@ export default function InventoryPage() {
               <TableBody>
                 {visibleItems.map((item) => {
                   const isOpen = expandedId === item.id
+                  const proj = locationStockById.get(item.id)
                   return (
                     <Fragment key={item.id}>
                       <TableRow className="hover:bg-accent cursor-pointer" onClick={() => setExpandedId(isOpen ? null : item.id)}>
@@ -514,6 +520,8 @@ export default function InventoryPage() {
                         <TableCell><Badge variant="secondary">{ITEM_TYPE_LABELS[item.itemType]}</Badge></TableCell>
                         <TableCell className="text-muted-foreground">{item.unit}</TableCell>
                         <TableCell className="text-right">{item.currentStock.toFixed(2)}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">{proj ? proj.kitchen.toFixed(2) : '—'}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">{proj ? proj.bar.toFixed(2) : '—'}</TableCell>
                         <TableCell className="text-right">{rwf(item.stockValue)}</TableCell>
                         <TableCell>
                           <StatusBadge status={item.currentStock <= item.reorderLevel ? 'low_stock' : 'active'} />

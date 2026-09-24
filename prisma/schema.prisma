@@ -22,20 +22,55 @@ enum HomeArea {
   cashier
 }
 
+// A functional area of the app (Requisitions, Purchase Orders, ...) — one
+// row per category in lib/permissions.ts's catalog, seeded from there (see
+// prisma/seed-permissions.ts). Exists so Permission rows have somewhere to
+// hang off; not itself admin-editable from the UI today.
+model Module {
+  id          String       @id @default(cuid())
+  key         String       @unique // e.g. "requisitions"
+  label       String                // e.g. "Requisitions"
+  permissions Permission[]
+
+  @@map("modules")
+}
+
+// One operation within a module (e.g. Requisitions' "manage" or "review").
+// `key` is the exact same dotted string every requirePermission(...) call
+// already uses ("requisitions.manage") — that string identity is what lets
+// the whole rest of the app (all API routes, nav-config, the client) stay
+// unchanged even though storage moved from a raw text[] to real rows.
+// `action` is a free label, not a fixed CRUD enum, since today's verbs vary
+// per module (view_costing, fulfill_any, manage_own vs manage_all, ...).
+model Permission {
+  id       String   @id @default(cuid())
+  moduleId String
+  module   Module   @relation(fields: [moduleId], references: [id])
+  key      String   @unique // e.g. "requisitions.manage"
+  action   String            // e.g. "manage"
+  label    String
+  roles    Role[]   @relation("RolePermissions")
+
+  @@map("permissions")
+}
+
 // Admin-editable role: a name, which page-shell it opens (homeArea), a
 // discount ceiling (replaces the old hardcoded DISCOUNT_CAPS), and a set of
-// permission keys (see lib/permissions.ts for the catalog) checked live on
-// every request — nothing here is cached in the session token. Deleting a
-// role with users still assigned is rejected (see role.service.ts); there's
-// no separate "isSystem" flag protecting the 4 seeded roles beyond that.
+// permissions (Module/Permission above) checked live on every request —
+// nothing here is cached in the session token. A role can only ever hold a
+// Permission that actually exists as a row (real FK, not just app-level
+// validation of a loose string array). Deleting a role with users still
+// assigned is rejected (see role.service.ts); there's no separate
+// "isSystem" flag protecting the 4 seeded roles beyond that.
+//
 model Role {
-  id                 String   @id @default(cuid())
-  name               String   @unique
+  id                 String       @id @default(cuid())
+  name               String       @unique
   homeArea           HomeArea
-  permissions        String[]
-  maxDiscountPercent Int      @default(0)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  permissions        Permission[] @relation("RolePermissions")
+  maxDiscountPercent Int          @default(0)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   users User[]
 
@@ -56,6 +91,8 @@ model User {
   purchaseOrdersCreated    PurchaseOrder[]            @relation("POCreatedBy")
   purchaseOrdersApproved   PurchaseOrder[]            @relation("POApprovedBy")
   goodsReceipts            GoodsReceipt[]             @relation("ReceivedByUser")
+  goodsReturns             GoodsReturn[]              @relation("GoodsReturnedByUser")
+  locationStockReturns     LocationStockReturn[]      @relation("LocationStockReturnedByUser")
   supplierPaymentsRecorded SupplierPayment[]          @relation("SupplierPaymentRecordedBy")
   inventoryTransactions    InventoryTransaction[]     @relation("RecordedByUser")
   prepProductionRuns       PrepProductionRun[]        @relation("PrepRecordedByUser")
@@ -203,13 +240,36 @@ model GoodsReceiptLine {
   goodsReceipt        GoodsReceipt      @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
   purchaseOrderItemId String
   purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id])
-  quantityReceived    Float
+  quantityReceived    Float // immutable historical fact — a return does NOT edit this, see GoodsReturn
   unitCost            Float // actual price paid for this batch — may differ from PO's expected unitCost
   costingMethod       CostingMethod // admin tags this batch FIFO or LIFO at receipt time
   inventoryLotId      String            @unique
   inventoryLot        InventoryLot      @relation(fields: [inventoryLotId], references: [id])
 
+  returns GoodsReturn[]
+
   @@map("goods_receipt_lines")
+}
+
+// Goods sent back to the supplier out of a specific received batch (wrong
+// item, damaged, excess — whatever the reason). Tied to the exact
+// GoodsReceiptLine/lot that was returned, never a generic FIFO/LIFO draw —
+// you return from the batch that's actually being sent back, capped at
+// whatever of it hasn't already been used (goods-receipt.service.ts
+// enforces quantityReturned <= that lot's current quantityRemaining). Its
+// own append-only record, plus one InventoryTransaction on the ledger —
+// GoodsReceiptLine.quantityReceived itself is never edited.
+model GoodsReturn {
+  id                 String           @id @default(cuid())
+  goodsReceiptLineId String
+  goodsReceiptLine   GoodsReceiptLine @relation(fields: [goodsReceiptLineId], references: [id])
+  quantityReturned   Float
+  reason             String
+  returnedById       String
+  returnedBy         User             @relation("GoodsReturnedByUser", fields: [returnedById], references: [id])
+  returnedAt         DateTime         @default(now())
+
+  @@map("goods_returns")
 }
 
 // ─────────────────────────────────────────────
@@ -282,6 +342,7 @@ enum InventoryTransactionType {
   consumption // deducted on order fulfillment or prep production input
   waste // spoilage / manual write-off — always lot-specific
   adjustment // manual correction, requires a reason code
+  return // sent back to the supplier — see GoodsReturn
 }
 
 // Source of the transaction, for audit/reporting (COGS per order, waste report, etc.)
@@ -292,6 +353,7 @@ enum InventoryTransactionSource {
   waste
   manual_adjustment
   stock_requisition // left main stock for kitchen/bar on requisition approval — see StockRequisition
+  supplier_return
 }
 
 // Immutable ledger — every receipt, consumption, waste, and adjustment, tied to the specific lot affected.
@@ -506,9 +568,32 @@ model StockRequisitionItem {
   inventoryItem     InventoryItem    @relation(fields: [inventoryItemId], references: [id])
   quantityRequested Float
   quantityApproved  Float? // set on approval — may be less than requested (partial send)
-  quantityReceived  Float? // set on receipt — may differ from approved (breakage/shortage in transit)
+  quantityReceived  Float? // set on receipt — may differ from approved (breakage/shortage in transit), never edited by a return
+
+  returns LocationStockReturn[]
 
   @@map("stock_requisition_items")
+}
+
+// Excess/unused stock sent back from a location (kitchen/bar) to Main —
+// the location-stock counterpart to GoodsReturn, but unlike a supplier
+// return this is a real reverse-transfer: Main's stock goes back up, not a
+// write-off. inventory.service.ts's returnLocationStockToMain credits the
+// exact original lots the requisition drew from (via the matching
+// consumption InventoryTransactions), so cost basis is preserved — never an
+// averaged/new-lot approximation. Capped at quantityReceived minus whatever
+// was already returned for this line.
+model LocationStockReturn {
+  id                     String               @id @default(cuid())
+  stockRequisitionItemId String
+  stockRequisitionItem   StockRequisitionItem @relation(fields: [stockRequisitionItemId], references: [id])
+  quantityReturned       Float
+  reason                 String
+  returnedById           String
+  returnedBy             User                 @relation("LocationStockReturnedByUser", fields: [returnedById], references: [id])
+  returnedAt             DateTime             @default(now())
+
+  @@map("location_stock_returns")
 }
 
 // Current quantity of one item sitting at one location right now — a cache,
@@ -529,6 +614,7 @@ model LocationStock {
 enum LocationStockTransactionType {
   receipt // a requisition was received at this location
   adjustment // manual correction by admin, requires a reason code
+  return // sent back to Main — see LocationStockReturn
 }
 
 // Immutable ledger for LocationStock, mirroring InventoryTransaction.

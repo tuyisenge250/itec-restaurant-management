@@ -30,15 +30,21 @@ async function assertUserChangeKeepsRoleManagementReachable(params: {
 }) {
   const { userId, nextIsActive, nextRoleId } = params
 
-  const current = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } })
+  const current = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { role: { include: { permissions: { select: { key: true } } } } },
+  })
   if (!current) throw new NotFoundError('User not found')
 
-  if (!isPrivilegedPermissionSet(current.role.permissions)) return
+  if (!isPrivilegedPermissionSet(current.role.permissions.map((p) => p.key))) return
 
   let stillHoldsBoth = nextIsActive
   if (stillHoldsBoth && nextRoleId && nextRoleId !== current.roleId) {
-    const nextRole = await prisma.role.findUnique({ where: { id: nextRoleId } })
-    stillHoldsBoth = !!nextRole && isPrivilegedPermissionSet(nextRole.permissions)
+    const nextRole = await prisma.role.findUnique({
+      where: { id: nextRoleId },
+      include: { permissions: { select: { key: true } } },
+    })
+    stillHoldsBoth = !!nextRole && isPrivilegedPermissionSet(nextRole.permissions.map((p) => p.key))
   }
   if (stillHoldsBoth) return
 
@@ -46,7 +52,12 @@ async function assertUserChangeKeepsRoleManagementReachable(params: {
     where: {
       isActive: true,
       id: { not: userId },
-      role: { permissions: { hasEvery: ['roles.manage', 'users.manage'] } },
+      role: {
+        AND: [
+          { permissions: { some: { key: 'roles.manage' } } },
+          { permissions: { some: { key: 'users.manage' } } },
+        ],
+      },
     },
   })
   if (othersWithBoth === 0) {
@@ -96,11 +107,16 @@ export async function updateUser(params: {
   let privilegeEscalation: { fromRole: string; toRole: string } | null = null
   if (data.roleId !== undefined) {
     const [currentUser, nextRole] = await Promise.all([
-      prisma.user.findUnique({ where: { id: userId }, include: { role: true } }),
-      prisma.role.findUnique({ where: { id: data.roleId } }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        include: { role: { include: { permissions: { select: { key: true } } } } },
+      }),
+      prisma.role.findUnique({ where: { id: data.roleId }, include: { permissions: { select: { key: true } } } }),
     ])
     if (currentUser && nextRole && currentUser.roleId !== nextRole.id) {
-      if (isPrivilegedPermissionSet(nextRole.permissions) && !isPrivilegedPermissionSet(currentUser.role.permissions)) {
+      const nextKeys = nextRole.permissions.map((p) => p.key)
+      const currentKeys = currentUser.role.permissions.map((p) => p.key)
+      if (isPrivilegedPermissionSet(nextKeys) && !isPrivilegedPermissionSet(currentKeys)) {
         privilegeEscalation = { fromRole: currentUser.role.name, toRole: nextRole.name }
       }
     }

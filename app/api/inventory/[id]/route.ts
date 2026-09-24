@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { requirePermission } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
+import { ConflictError } from '@/lib/errors'
 
 const updateInventoryItemSchema = z.object({
   name: z.string().min(1).optional(),
@@ -28,6 +29,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await requirePermission('inventory.manage')
     const { id } = await params
     const body = updateInventoryItemSchema.parse(await req.json())
+
+    if (body.name) {
+      const existing = await prisma.inventoryItem.findFirst({
+        where: { name: { equals: body.name, mode: 'insensitive' }, id: { not: id } },
+      })
+      if (existing) {
+        throw new ConflictError(`An inventory item named "${existing.name}" already exists`)
+      }
+    }
+
     const item = await prisma.inventoryItem.update({ where: { id }, data: body })
     return NextResponse.json(item)
   } catch (err) {

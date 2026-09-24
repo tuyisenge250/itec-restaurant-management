@@ -1,8 +1,19 @@
 import { prisma } from '@/lib/db/prisma'
-import type { HomeArea } from '@prisma/client'
+import type { HomeArea, Role } from '@prisma/client'
 import { writeAuditLog } from '@/lib/audit'
 import { BusinessRuleError, ConflictError, NotFoundError } from '@/lib/errors'
 import { isPrivilegedPermissionSet } from '@/lib/permissions'
+
+// Every role query below asks for just the permission keys and flattens the
+// result back to a plain string[] — this is the one place that knows
+// permissions live on real Permission rows under a Module; every caller of
+// these service functions (API routes, the client, the audit log) keeps
+// seeing the same { ...role, permissions: string[] } shape as before.
+const WITH_PERMISSION_KEYS = { permissions: { select: { key: true } } } as const
+type RoleWithPermissionRows = Role & { permissions: { key: string }[] }
+function flattenPermissions(role: RoleWithPermissionRows) {
+  return { ...role, permissions: role.permissions.map((p) => p.key) }
+}
 
 /**
  * Guards against an admin editing a role's permissions down to the point
@@ -19,7 +30,12 @@ async function assertKeepsRoleManagementReachable(roleId: string, newPermissions
     where: {
       isActive: true,
       roleId: { not: roleId },
-      role: { permissions: { hasEvery: ['roles.manage', 'users.manage'] } },
+      role: {
+        AND: [
+          { permissions: { some: { key: 'roles.manage' } } },
+          { permissions: { some: { key: 'users.manage' } } },
+        ],
+      },
     },
   })
   if (othersWithBoth === 0) {
@@ -37,9 +53,13 @@ export async function createRole(params: {
   permissions: string[]
   userId: string
 }) {
-  const { userId, ...data } = params
+  const { userId, permissions, ...data } = params
   return prisma.$transaction(async (tx) => {
-    const role = await tx.role.create({ data })
+    const created = await tx.role.create({
+      data: { ...data, permissions: { connect: permissions.map((key) => ({ key })) } },
+      include: WITH_PERMISSION_KEYS,
+    })
+    const role = flattenPermissions(created)
     await writeAuditLog(tx, { userId, action: 'role.created', entityType: 'Role', entityId: role.id, afterData: role })
     if (isPrivilegedPermissionSet(role.permissions)) {
       await writeAuditLog(tx, {
@@ -62,17 +82,23 @@ export async function updateRole(params: {
   permissions?: string[]
   userId: string
 }) {
-  const { roleId, userId, ...data } = params
+  const { roleId, userId, permissions, ...data } = params
 
   return prisma.$transaction(async (tx) => {
-    const before = await tx.role.findUnique({ where: { id: roleId } })
-    if (!before) throw new NotFoundError('Role not found')
+    const beforeRow = await tx.role.findUnique({ where: { id: roleId }, include: WITH_PERMISSION_KEYS })
+    if (!beforeRow) throw new NotFoundError('Role not found')
+    const before = flattenPermissions(beforeRow)
 
-    if (data.permissions !== undefined) {
-      await assertKeepsRoleManagementReachable(roleId, data.permissions)
+    if (permissions !== undefined) {
+      await assertKeepsRoleManagementReachable(roleId, permissions)
     }
 
-    const updated = await tx.role.update({ where: { id: roleId }, data })
+    const updatedRow = await tx.role.update({
+      where: { id: roleId },
+      data: { ...data, ...(permissions !== undefined && { permissions: { set: permissions.map((key) => ({ key })) } }) },
+      include: WITH_PERMISSION_KEYS,
+    })
+    const updated = flattenPermissions(updatedRow)
     await writeAuditLog(tx, {
       userId,
       action: 'role.updated',
@@ -102,8 +128,9 @@ export async function deleteRole(params: { roleId: string; userId: string }) {
   const { roleId, userId } = params
 
   return prisma.$transaction(async (tx) => {
-    const role = await tx.role.findUnique({ where: { id: roleId } })
-    if (!role) throw new NotFoundError('Role not found')
+    const roleRow = await tx.role.findUnique({ where: { id: roleId }, include: WITH_PERMISSION_KEYS })
+    if (!roleRow) throw new NotFoundError('Role not found')
+    const role = flattenPermissions(roleRow)
 
     const usersOnRole = await tx.user.count({ where: { roleId } })
     if (usersOnRole > 0) {

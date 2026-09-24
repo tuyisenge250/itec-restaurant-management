@@ -47,7 +47,7 @@ export async function requireUser(): Promise<SessionUser> {
 
   const user = await prisma.user.findUnique({
     where: { id: claims.sub },
-    include: { role: true },
+    include: { role: { include: { permissions: { select: { key: true } } } } },
   })
   if (!user || !user.isActive) throw new UnauthenticatedError()
 
@@ -59,7 +59,11 @@ export async function requireUser(): Promise<SessionUser> {
       id: user.role.id,
       name: user.role.name,
       homeArea: user.role.homeArea,
-      permissions: user.role.permissions,
+      // Flattened back to a plain string[] here, at the one place every
+      // downstream consumer (requirePermission, hasPermission, nav-config,
+      // the client) reads from — so none of them need to know permissions
+      // are now real rows under a Module rather than a raw text[].
+      permissions: user.role.permissions.map((p) => p.key),
       maxDiscountPercent: user.role.maxDiscountPercent,
     },
   }

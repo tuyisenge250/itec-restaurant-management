@@ -17,6 +17,7 @@ import {
   Package,
   ArrowLeftRight,
   ShieldCheck,
+  PackageCheck,
 } from 'lucide-react'
 
 export type Role = 'admin' | 'kitchen' | 'waiter' | 'cashier'
@@ -38,6 +39,7 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Orders', url: '/admin/orders', icon: ListOrdered, permissions: ['orders.view_all'] },
     { title: 'Suppliers', url: '/admin/suppliers', icon: Truck, permissions: ['suppliers.manage'] },
     { title: 'Purchase orders', url: '/admin/purchase-orders', icon: ClipboardList, permissions: ['purchase_orders.manage'] },
+    { title: 'Goods receipts', url: '/admin/goods-receipts', icon: PackageCheck, permissions: ['goods_receipts.view', 'purchase_orders.manage', 'requisitions.manage'] },
     { title: 'Inventory', url: '/admin/inventory', icon: Boxes, permissions: ['inventory.view'] },
     { title: 'Requisitions', url: '/admin/requisitions', icon: ArrowLeftRight, permissions: ['requisitions.manage'] },
     { title: 'Recipes', url: '/admin/recipes', icon: BookOpen, permissions: ['prep_recipes.view'] },
@@ -51,6 +53,7 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Orders', url: '/kitchen/orders', icon: ChefHat, permissions: ['order_items.fulfill_prep'] },
     { title: 'Finished stock', url: '/kitchen/stock', icon: Package, permissions: ['inventory.view'] },
     { title: 'Stock requests', url: '/kitchen/requisitions', icon: ArrowLeftRight, permissions: ['requisitions.manage'] },
+    { title: 'Goods receipts', url: '/kitchen/goods-receipts', icon: PackageCheck, permissions: ['requisitions.manage'] },
     { title: 'Waste', url: '/kitchen/waste', icon: Trash2, permissions: ['inventory.waste'] },
   ],
   waiter: [
@@ -63,5 +66,6 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Payments', url: '/cashier/payments', icon: CreditCard, permissions: ['payments.confirm'] },
     { title: 'Orders', url: '/cashier/orders', icon: ListOrdered, permissions: ['orders.view_all'] },
     { title: 'Stock requests', url: '/cashier/requisitions', icon: ArrowLeftRight, permissions: ['requisitions.manage'] },
+    { title: 'Goods receipts', url: '/cashier/goods-receipts', icon: PackageCheck, permissions: ['requisitions.manage'] },
   ],
 }

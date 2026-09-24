@@ -2,6 +2,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import { SEED_ROLES } from './seed-roles'
+import { seedPermissionCatalog } from './seed-permissions'
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! })
 const prisma = new PrismaClient({ adapter })
@@ -9,14 +10,18 @@ const prisma = new PrismaClient({ adapter })
 async function main() {
   const passwordHash = await bcrypt.hash('demo1234', 10)
 
+  // Module/Permission rows must exist before any role can connect to them.
+  await seedPermissionCatalog(prisma)
+
   // The 4 seeded dynamic roles — created here so a fresh database seeds with
   // working role-based access out of the box.
   const roleByName = new Map<string, string>()
   for (const r of SEED_ROLES) {
+    const { permissions, ...roleData } = r
     const row = await prisma.role.upsert({
       where: { name: r.name },
-      update: { homeArea: r.homeArea, permissions: r.permissions, maxDiscountPercent: r.maxDiscountPercent },
-      create: r,
+      update: { ...roleData, permissions: { set: permissions.map((key) => ({ key })) } },
+      create: { ...roleData, permissions: { connect: permissions.map((key) => ({ key })) } },
     })
     roleByName.set(r.name, row.id)
   }

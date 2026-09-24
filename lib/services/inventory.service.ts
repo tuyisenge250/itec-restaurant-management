@@ -1,4 +1,4 @@
-import { Prisma, type InventoryTransactionSource } from '@prisma/client'
+import { Prisma, type InventoryTransactionSource, type StockLocation } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { InsufficientStockError, BusinessRuleError, NotFoundError } from '@/lib/errors'
 import { recomputeAvailabilityForIngredient } from './menu.service'
@@ -315,6 +315,54 @@ export async function logWaste(
 }
 
 /**
+ * Supplier return write-off — same shape as logWaste (always lot-specific,
+ * capped at what's still remaining in that exact batch), because a return
+ * has to come from the actual batch sent back, not a generic FIFO/LIFO draw.
+ * Called from goods-receipt.service.ts, which also creates the GoodsReturn
+ * record; this only moves the stock and writes the ledger entry.
+ */
+export async function logSupplierReturn(
+  tx: TxClient,
+  params: { lotId: string; quantity: number; recordedById: string; reason: string }
+) {
+  const { lotId, quantity, recordedById, reason } = params
+  if (quantity <= 0) throw new BusinessRuleError('Return quantity must be positive')
+
+  const [lot] = await tx.$queryRaw<
+    { id: string; inventoryItemId: string; quantityRemaining: number; unitCost: number }[]
+  >`
+    SELECT id, "inventoryItemId", "quantityRemaining", "unitCost" FROM inventory_lots
+    WHERE id = ${lotId}
+    FOR UPDATE
+  `
+  if (!lot) throw new NotFoundError('Inventory lot not found')
+  if (lot.quantityRemaining + EPSILON < quantity) {
+    throw new InsufficientStockError(
+      `Cannot return ${quantity} from a batch that only has ${lot.quantityRemaining} remaining`
+    )
+  }
+
+  await tx.inventoryLot.update({
+    where: { id: lotId },
+    data: { quantityRemaining: { decrement: quantity } },
+  })
+  await tx.inventoryTransaction.create({
+    data: {
+      inventoryItemId: lot.inventoryItemId,
+      lotId,
+      type: 'return',
+      source: 'supplier_return',
+      quantity: -quantity,
+      unitCost: lot.unitCost,
+      recordedById,
+      reasonCode: reason,
+    },
+  })
+
+  await syncCurrentStock(tx, lot.inventoryItemId)
+}
+
+/**
  * Corrects a lot's unit cost (e.g. the receiving price was entered wrong).
  * No stock moves, so it's logged as a zero-quantity adjustment transaction —
  * separate from adjustStock, which exists specifically to reject zero deltas
@@ -415,4 +463,88 @@ export async function adjustStock(
   })
 
   await syncCurrentStock(tx, lot.inventoryItemId)
+}
+
+/**
+ * Excess/unused location stock sent back to Main — unlike logSupplierReturn
+ * (a write-off), this is a real reverse-transfer: Main's stock goes back up.
+ * Credits the EXACT lots this requisition originally drew from (looked up
+ * via the matching consumption InventoryTransactions for the same
+ * referenceId+item, oldest first), never an averaged or brand-new lot, so
+ * cost basis stays exact. Throws if the original consumption history can't
+ * cover the full return quantity — callers must cap at what's actually
+ * returnable (stock-requisition.service.ts does, via quantityReceived minus
+ * prior returns), so hitting this would mean a caller bug, not a
+ * legitimate user error.
+ */
+export async function returnLocationStockToMain(
+  tx: TxClient,
+  params: {
+    inventoryItemId: string
+    location: StockLocation
+    quantity: number
+    referenceId: string
+    recordedById: string
+    reason: string
+  }
+) {
+  const { inventoryItemId, location, quantity, referenceId, recordedById, reason } = params
+  if (quantity <= 0) throw new BusinessRuleError('Return quantity must be positive')
+
+  const [locationStock] = await tx.$queryRaw<{ id: string; quantity: number }[]>`
+    SELECT id, quantity FROM location_stocks
+    WHERE "inventoryItemId" = ${inventoryItemId} AND location = ${location}::"StockLocation"
+    FOR UPDATE
+  `
+  if (!locationStock || locationStock.quantity + EPSILON < quantity) {
+    throw new InsufficientStockError(
+      `Cannot return ${quantity} — this location only has ${locationStock?.quantity ?? 0} remaining`
+    )
+  }
+
+  await tx.locationStock.update({ where: { id: locationStock.id }, data: { quantity: { decrement: quantity } } })
+  await tx.locationStockTransaction.create({
+    data: {
+      inventoryItemId,
+      location,
+      type: 'return',
+      quantity: -quantity,
+      referenceId,
+      reasonCode: reason,
+      recordedById,
+    },
+  })
+
+  const originalDraws = await tx.inventoryTransaction.findMany({
+    where: { inventoryItemId, referenceId, type: 'consumption' },
+    orderBy: { createdAt: 'asc' },
+  })
+
+  let remaining = quantity
+  for (const draw of originalDraws) {
+    if (remaining <= EPSILON) break
+    const giveBack = Math.min(-draw.quantity, remaining) // draw.quantity stored negative
+    if (giveBack <= EPSILON) continue
+
+    await tx.inventoryLot.update({ where: { id: draw.lotId }, data: { quantityRemaining: { increment: giveBack } } })
+    await tx.inventoryTransaction.create({
+      data: {
+        inventoryItemId,
+        lotId: draw.lotId,
+        type: 'adjustment',
+        source: 'stock_requisition',
+        quantity: giveBack,
+        unitCost: draw.unitCost,
+        referenceId,
+        reasonCode: reason,
+        recordedById,
+      },
+    })
+    remaining -= giveBack
+  }
+  if (remaining > EPSILON) {
+    throw new BusinessRuleError('Could not credit Main stock — original consumption history does not cover this quantity')
+  }
+
+  await syncCurrentStock(tx, inventoryItemId)
 }

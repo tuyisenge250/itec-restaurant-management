@@ -8,10 +8,19 @@ import {
   approveRequisitionSchema,
   rejectRequisitionSchema,
   receiveRequisitionSchema,
+  recordLocationReturnSchema,
 } from '@/lib/validation/stock-requisition.schema'
 
 export type StockLocation = 'kitchen' | 'bar'
 export type StockRequisitionStatus = 'pending' | 'on_hold' | 'approved' | 'rejected' | 'received' | 'cancelled'
+
+export type LocationStockReturn = {
+  id: string
+  quantityReturned: number
+  reason: string
+  returnedAt: string
+  returnedBy: { name: string }
+}
 
 export type StockRequisitionItem = {
   id: string
@@ -20,6 +29,7 @@ export type StockRequisitionItem = {
   quantityRequested: number
   quantityApproved: number | null
   quantityReceived: number | null
+  returns: LocationStockReturn[]
 }
 
 export type StockRequisition = {
@@ -47,6 +57,7 @@ export type CreateRequisitionInput = z.infer<typeof createRequisitionSchema>
 export type ApproveRequisitionInput = z.infer<typeof approveRequisitionSchema>
 export type RejectRequisitionInput = z.infer<typeof rejectRequisitionSchema>
 export type ReceiveRequisitionInput = z.infer<typeof receiveRequisitionSchema>
+export type RecordLocationReturnInput = z.infer<typeof recordLocationReturnSchema>
 
 export type StockRequisitionFilters = { location?: StockLocation; status?: StockRequisitionStatus }
 
@@ -66,6 +77,8 @@ export const holdStockRequisition = (id: string) =>
   apiFetch<StockRequisition>(`/api/stock-requisitions/${id}/hold`, { method: 'POST' })
 export const receiveStockRequisition = (id: string, data: ReceiveRequisitionInput) =>
   apiFetch<StockRequisition>(`/api/stock-requisitions/${id}/receive`, { method: 'POST', body: JSON.stringify(data) })
+export const recordLocationStockReturn = (itemId: string, data: RecordLocationReturnInput) =>
+  apiFetch<LocationStockReturn>(`/api/stock-requisitions/items/${itemId}/return`, { method: 'POST', body: JSON.stringify(data) })
 
 export function useStockRequisitions(filters?: StockRequisitionFilters) {
   return useQuery({ queryKey: ['stock-requisitions', filters], queryFn: () => getStockRequisitions(filters) })
@@ -122,6 +135,19 @@ export function useReceiveStockRequisition() {
       qc.invalidateQueries({ queryKey: ['stock-requisitions'] })
       qc.invalidateQueries({ queryKey: ['location-stock'] })
       toast.success('Receipt confirmed')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+export function useRecordLocationStockReturn() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ itemId, data }: { itemId: string; data: RecordLocationReturnInput }) => recordLocationStockReturn(itemId, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['stock-requisitions'] })
+      qc.invalidateQueries({ queryKey: ['location-stock'] })
+      qc.invalidateQueries({ queryKey: ['inventory'] })
+      toast.success('Stock returned to Main')
     },
     onError: (e: Error) => toast.error(e.message),
   })

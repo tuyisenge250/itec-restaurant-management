@@ -44,6 +44,11 @@ export const receiveRequisitionSchema = z.object({
     .min(1),
 })
 
+export const recordLocationReturnSchema = z.object({
+  quantityReturned: z.number().positive(),
+  reason: z.string().min(1, 'A reason is required'),
+})
+
 export const adjustLocationStockSchema = z.object({
   inventoryItemId: z.string().min(1),
   location: z.enum(['kitchen', 'bar']),

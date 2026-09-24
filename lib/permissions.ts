@@ -24,6 +24,8 @@ export const PERMISSIONS: Permission[] = [
 
   // Purchase Orders
   { key: 'purchase_orders.manage', label: 'Manage purchase orders, receiving, and supplier payments', category: 'Purchase Orders' },
+  { key: 'goods_receipts.view', label: 'View goods receipt notes (GRNs)', category: 'Purchase Orders' },
+  { key: 'goods_receipts.return', label: 'Record a return against a goods receipt', category: 'Purchase Orders' },
 
   // Inventory
   { key: 'inventory.view', label: 'View inventory items and stock levels', category: 'Inventory' },

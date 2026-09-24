@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { requirePermission } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { handleApiError } from '@/lib/api-error'
+import { ConflictError } from '@/lib/errors'
 
 const createInventoryItemSchema = z.object({
   name: z.string().min(1),
@@ -42,6 +43,17 @@ export async function POST(req: NextRequest) {
   try {
     await requirePermission('inventory.manage')
     const body = createInventoryItemSchema.parse(await req.json())
+
+    // Case-insensitive so "Cheese" and "cheese" collide too — this is what
+    // actually causes accidental duplicates (someone typing a new name
+    // instead of picking the existing item from a dropdown).
+    const existing = await prisma.inventoryItem.findFirst({
+      where: { name: { equals: body.name, mode: 'insensitive' } },
+    })
+    if (existing) {
+      throw new ConflictError(`An inventory item named "${existing.name}" already exists`)
+    }
+
     const item = await prisma.inventoryItem.create({ data: body })
     return NextResponse.json(item, { status: 201 })
   } catch (err) {
